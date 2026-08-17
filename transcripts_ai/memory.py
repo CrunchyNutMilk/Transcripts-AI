@@ -224,6 +224,18 @@ class CampaignMemory:
                 )"""
             )
             c.execute(
+                """CREATE TABLE IF NOT EXISTS pipeline_chunks (
+                    campaign_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    chunk_number INTEGER NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    detail TEXT NOT NULL DEFAULT '',
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (campaign_id, session_id, chunk_number)
+                )"""
+            )
+            c.execute(
                 """CREATE TABLE IF NOT EXISTS audit_log (
                     audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     campaign_id TEXT NOT NULL,
@@ -791,6 +803,42 @@ class CampaignMemory:
         with self._conn:
             self._conn.execute(
                 "DELETE FROM file_index WHERE campaign_id=? AND path=?", (campaign_id, path)
+            )
+
+    # -- pipeline resumability ----------------------------------------------
+
+    def chunk_state(
+        self, campaign_id: str, session_id: str, chunk_number: int, source_hash: str
+    ) -> str | None:
+        """Return the completed status for this exact chunk content, if any.
+
+        A changed source_hash invalidates the stored state so edited
+        transcripts are reprocessed rather than skipped.
+        """
+        row = self._conn.execute(
+            "SELECT status, source_hash FROM pipeline_chunks"
+            " WHERE campaign_id=? AND session_id=? AND chunk_number=?",
+            (campaign_id, session_id, chunk_number),
+        ).fetchone()
+        if row is None or row["source_hash"] != source_hash:
+            return None
+        return row["status"]
+
+    def set_chunk_state(
+        self,
+        campaign_id: str,
+        session_id: str,
+        chunk_number: int,
+        source_hash: str,
+        status: str,
+        *,
+        detail: str = "",
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO pipeline_chunks VALUES (?,?,?,?,?,?,?)",
+                (campaign_id, session_id, chunk_number, source_hash, status,
+                 detail, time.time()),
             )
 
     # -- fine-tuning export --------------------------------------------------

@@ -1,0 +1,165 @@
+"""Session processing orchestrator.
+
+Ties the components into the end-to-end run for one session:
+
+    parse -> chunk -> per chunk: [context -> extract -> verify] (resumable)
+          -> contradiction check -> memory writes -> summary -> report
+
+Facts are written to memory as soon as their chunk completes, and each chunk's
+completion is checkpointed against the chunk content hash, so an interrupted
+run resumes where it stopped and an edited transcript reprocesses only what
+changed. The source file is read once and never written.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .extraction import (
+    ExtractionResult,
+    FactExtractor,
+    FactVerifier,
+    detect_memory_contradictions,
+)
+from .memory import CampaignMemory
+from .providers import RoleRegistry
+from .retrieval import ContextBuilder
+from .schemas import Fact, ReviewItem, SessionSummary, text_sha256
+from .summarizer import SessionSummarizer, render_markdown
+from .transcript import chunk_transcript, parse_transcript, validate_chunks
+
+PIPELINE_VERSION = "engine-pipeline-v1"
+
+
+@dataclass
+class SessionReport:
+    campaign_id: str
+    session_id: str
+    chunks_total: int
+    chunks_processed: int
+    chunks_skipped_resume: int
+    facts_verified: list[Fact] = field(default_factory=list)
+    facts_disputed: list[Fact] = field(default_factory=list)
+    facts_rejected: int = 0
+    contradictions: list[tuple[str, str]] = field(default_factory=list)
+    review_items: list[ReviewItem] = field(default_factory=list)
+    summary: SessionSummary | None = None
+    summary_markdown: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+class SessionPipeline:
+    def __init__(
+        self,
+        memory: CampaignMemory,
+        registry: RoleRegistry,
+        *,
+        context_budget_chars: int = 24_000,
+    ):
+        self.memory = memory
+        self.registry = registry
+        self.context_builder = ContextBuilder(memory, budget_chars=context_budget_chars)
+
+    def process_session(
+        self,
+        *,
+        campaign_id: str,
+        session_id: str,
+        transcript_path: str | Path,
+        game_name: str,
+        session_date: str,
+    ) -> SessionReport:
+        path = Path(transcript_path)
+        text = path.read_text(encoding="utf-8-sig")
+        parsed = parse_transcript(text, source_path=str(path))
+        chunks = chunk_transcript(parsed)
+        validate_chunks(parsed, chunks)
+
+        extractor = FactExtractor(self.registry.provider_for("extractor"), self.memory)
+        verifier = FactVerifier(self.registry.provider_for("verifier"), self.memory)
+
+        report = SessionReport(
+            campaign_id=campaign_id,
+            session_id=session_id,
+            chunks_total=len(chunks),
+            chunks_processed=0,
+            chunks_skipped_resume=0,
+        )
+        if parsed.unparsed_lines:
+            report.warnings.append(
+                f"{len(parsed.unparsed_lines)} line(s) did not parse as speaker turns"
+            )
+
+        all_verified: list[Fact] = []
+        for chunk in chunks:
+            chunk_hash = text_sha256(chunk.text)
+            if self.memory.chunk_state(campaign_id, session_id, chunk.chunk_number,
+                                       chunk_hash) == "done":
+                report.chunks_skipped_resume += 1
+                all_verified.extend(
+                    f for f in self.memory.facts_for_session(campaign_id, session_id)
+                    if f.provenance.line_start >= chunk.line_start
+                    and f.provenance.line_end <= chunk.line_end
+                )
+                continue
+
+            context = self.context_builder.build(
+                campaign_id, session_id, chunk, task="extractor"
+            )
+            extraction: ExtractionResult = extractor.extract(
+                campaign_id, session_id, chunk, context,
+                source_path=str(path), source_hash=parsed.source_hash,
+            )
+            report.facts_rejected += len(extraction.rejected)
+            report.review_items.extend(extraction.review_items)
+
+            verification = verifier.verify(
+                campaign_id, session_id, extraction.facts, context
+            )
+            report.review_items.extend(verification.review_items)
+            report.facts_disputed.extend(verification.disputed)
+
+            for fact in verification.verified:
+                self.memory.remember_fact(fact, actor=PIPELINE_VERSION)
+            # Disputed facts are remembered too — flagged, never silently kept
+            # out of the record; the review queue decides their future.
+            for fact in verification.disputed:
+                self.memory.remember_fact(fact, actor=PIPELINE_VERSION)
+
+            all_verified.extend(verification.verified)
+            report.chunks_processed += 1
+            self.memory.set_chunk_state(
+                campaign_id, session_id, chunk.chunk_number, chunk_hash, "done",
+                detail=f"verified={len(verification.verified)} disputed={len(verification.disputed)}",
+            )
+
+        report.facts_verified = all_verified
+        report.contradictions = detect_memory_contradictions(
+            self.memory, campaign_id, all_verified, actor=PIPELINE_VERSION
+        )
+
+        # Summary context: reuse the first chunk plus memory-derived sources.
+        summarizer = SessionSummarizer(self.registry.provider_for("summarizer"), self.memory)
+        summary_context = self.context_builder.build(
+            campaign_id, session_id, chunks[0], task="summarizer"
+        )
+        summary, summary_reviews = summarizer.summarize(
+            campaign_id,
+            session_id,
+            game_name=game_name,
+            session_date=session_date,
+            parsed=parsed,
+            verified_facts=all_verified,
+            context=summary_context,
+        )
+        report.review_items.extend(summary_reviews)
+        if summary is not None:
+            report.summary = summary
+            report.summary_markdown = render_markdown(summary)
+            self.memory.remember_summary(
+                campaign_id, session_id, report.summary_markdown,
+                summary.manifest_hash, actor=PIPELINE_VERSION,
+            )
+        else:
+            report.warnings.append("summary failed validation; queued for review")
+        return report
