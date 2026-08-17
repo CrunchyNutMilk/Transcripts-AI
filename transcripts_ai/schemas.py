@@ -347,6 +347,7 @@ class ReviewAction(str, Enum):
     CORRECT = "correct"
     ALIAS = "alias"
     NEW = "new"
+    NOT_ENTITY = "not_entity"
     SAVE_FOR_REVIEW = "save_for_review"
     LET_AI_PICK = "let_ai_pick"
     DONT_KNOW_YET = "dont_know_yet"

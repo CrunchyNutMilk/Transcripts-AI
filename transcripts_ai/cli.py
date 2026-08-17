@@ -79,12 +79,96 @@ def cmd_reviews(args: argparse.Namespace) -> int:
         items = memory.pending_reviews(args.campaign)
     finally:
         memory.close()
-    for item in items:
-        print(f"[{item.item_type}] {item.item_id}  {item.subject}")
-        print(f"    reason: {item.reason}")
+    for index, item in enumerate(items, start=1):
+        print(f"{index:3d}. [{item.item_type}] {item.item_id}  {item.subject}")
+        print(f"     reason: {item.reason}")
         for suggestion in item.suggestions:
-            print(f"    suggestion: {suggestion}")
+            canonical = suggestion.get("canonical", "?")
+            print(f"     suggestion: {canonical} "
+                  f"(score {suggestion.get('score', '?')}, {suggestion.get('reason', '')})")
     print(f"{len(items)} pending review item(s)")
+    print("resolve with: python -m transcripts_ai resolve --campaign <c> "
+          "--item <id|number> --action correct|alias|new|not-entity|defer|dont-know ...")
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    from .review import ReviewCoordinator
+    from .schemas import EntityKind
+
+    memory = _memory(args)
+    try:
+        items = memory.pending_reviews(args.campaign)
+        item = None
+        if args.item.isdigit() and 1 <= int(args.item) <= len(items):
+            item = items[int(args.item) - 1]
+        else:
+            item = next((i for i in items if i.item_id == args.item), None)
+        if item is None:
+            print(f"no pending item {args.item!r}; run `reviews` to list")
+            return 1
+        actor = f"human:{args.user}"
+        coordinator = ReviewCoordinator(memory)
+        if args.action == "correct":
+            if not args.canonical:
+                print("--canonical required for correct")
+                return 2
+            coordinator.correct(item, canonical=args.canonical, actor=actor,
+                                apply_to_all=not args.this_occurrence_only)
+            if args.reject_others:
+                for suggestion in item.suggestions:
+                    other = suggestion.get("canonical")
+                    if other and other != args.canonical:
+                        coordinator.reject_suggestion(item, canonical=other, actor=actor)
+        elif args.action == "alias":
+            if not args.canonical:
+                print("--canonical required for alias")
+                return 2
+            coordinator.alias(item, canonical=args.canonical, actor=actor,
+                              reason=args.reason or "")
+        elif args.action == "new":
+            kinds = {k.value: k for k in EntityKind}
+            if args.kind not in kinds:
+                print(f"--kind must be one of: {', '.join(sorted(kinds))}")
+                return 2
+            coordinator.new_entity(item, kind=kinds[args.kind], actor=actor,
+                                   vault_path=args.vault_path,
+                                   description=args.reason or "")
+        elif args.action == "not-entity":
+            coordinator.not_entity(item, actor=actor)
+        elif args.action == "reject":
+            if not args.canonical:
+                print("--canonical required for reject")
+                return 2
+            coordinator.reject_suggestion(item, canonical=args.canonical, actor=actor)
+        elif args.action == "defer":
+            coordinator.save_for_review(item, actor=actor)
+        elif args.action == "dont-know":
+            coordinator.dont_know_yet(item, reason=args.reason or "other", actor=actor)
+        print(f"{args.action}: {item.subject}"
+              + (f" -> {args.canonical}" if args.canonical else ""))
+    finally:
+        memory.close()
+    return 0
+
+
+def cmd_entities(args: argparse.Namespace) -> int:
+    memory = _memory(args)
+    try:
+        entities = memory.entities(args.campaign)
+        needle = (args.query or "").casefold()
+        for entity in entities:
+            if needle and needle not in entity.name.casefold():
+                continue
+            path = f"  -> {entity.vault_path}" if entity.vault_path else ""
+            print(f"[{entity.kind.value:12s}] {entity.name}  ({entity.status.value}){path}")
+        aliases = memory.aliases(args.campaign)
+        if aliases and not needle:
+            print("\naliases:")
+            for alias in aliases:
+                print(f'  "{alias.observed}" -> "{alias.canonical}"')
+    finally:
+        memory.close()
     return 0
 
 
@@ -193,6 +277,27 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("reviews", help="list pending review items")
     p.add_argument("--campaign", required=True)
     p.set_defaults(func=cmd_reviews)
+
+    p = sub.add_parser("resolve", help="apply a human decision to a review item")
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--item", required=True, help="item id or list number")
+    p.add_argument("--action", required=True,
+                   choices=["correct", "alias", "new", "not-entity", "reject",
+                            "defer", "dont-know"])
+    p.add_argument("--canonical", help="target name for correct/alias/reject")
+    p.add_argument("--kind", help="entity kind for new (pc, npc, location, ...)")
+    p.add_argument("--vault-path", help="vault page path for new")
+    p.add_argument("--reason", help="free-text reason/description")
+    p.add_argument("--user", default="owner")
+    p.add_argument("--this-occurrence-only", action="store_true")
+    p.add_argument("--reject-others", action="store_true",
+                   help="with correct: also mark other suggestions rejected")
+    p.set_defaults(func=cmd_resolve)
+
+    p = sub.add_parser("entities", help="list known entities and aliases")
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--query", help="filter by substring")
+    p.set_defaults(func=cmd_entities)
 
     p = sub.add_parser("facts", help="search or list remembered facts")
     p.add_argument("--campaign", required=True)

@@ -135,6 +135,20 @@ class ReviewCoordinator:
         )
         return entity
 
+    def not_entity(self, item: ReviewItem, *, actor: str) -> ReviewItem:
+        """The candidate is an ordinary word/noise, not a name. Remembered so
+        it is never proposed again for this campaign."""
+        self._require_human(actor)
+        resolved = self.memory.resolve_review(
+            item.campaign_id, item.item_id, action=ReviewAction.NOT_ENTITY, actor=actor,
+        )
+        self.memory.record_feedback(
+            item.campaign_id, item.session_id, kind="entity_misclassified",
+            subject=item.subject, accepted=True, actor=actor,
+            detail={"decision": "not_an_entity"},
+        )
+        return resolved
+
     def save_for_review(self, item: ReviewItem, *, actor: str) -> ReviewItem:
         resolved = self.memory.resolve_review(
             item.campaign_id, item.item_id, action=ReviewAction.SAVE_FOR_REVIEW,

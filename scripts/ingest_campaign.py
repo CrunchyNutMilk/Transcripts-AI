@@ -87,9 +87,22 @@ def main() -> int:
     parser.add_argument("--report", default=None)
     args = parser.parse_args()
 
-    files = sorted(Path(args.data_dir).glob("*.md"))
+    # Walk the vault layout recursively; accept anything that is a Mapped
+    # transcript by filename or frontmatter. Never touch Unmapped files.
+    root = Path(args.data_dir)
+    files = []
+    for path in sorted(root.rglob("*.md")):
+        name = path.name.casefold()
+        if "unmapped" in name:
+            continue
+        if "transcript" in name and "mapped" in name:
+            files.append(path)
+            continue
+        head = path.read_text(encoding="utf-8-sig", errors="replace")[:300]
+        if "type: transcript-mapped" in head:
+            files.append(path)
     if not files:
-        print(f"no .md files under {args.data_dir}")
+        print(f"no Mapped transcripts under {args.data_dir}")
         return 1
 
     memory = CampaignMemory(args.db)
@@ -264,6 +277,10 @@ def main() -> int:
         session_count = len(name_sessions[folded])
         # Credibility gate: repeated across sessions, or a strong pattern.
         if session_count < 2 and not (strong & reasons):
+            continue
+        # Human previously said "not an entity" -> never propose again.
+        rows = memory.feedback_for(campaign_id, "entity_misclassified", display)
+        if rows and rows[-1]["accepted"]:
             continue
         resolution = resolver.resolve(campaign_id, display)
         if resolution.best is not None and resolution.best.score == 1.0:

@@ -61,8 +61,9 @@ def transcribe_whisper_cpp(path: Path, server: str) -> list[tuple[float, float, 
     for name, value in fields.items():
         body += (f"--{boundary}\r\nContent-Disposition: form-data; "
                  f'name="{name}"\r\n\r\n{value}\r\n').encode()
+    content_type = "audio/wav" if path.suffix.lower() == ".wav" else "audio/mpeg"
     body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
-             f'filename="{path.name}"\r\nContent-Type: audio/mpeg\r\n\r\n').encode()
+             f'filename="{path.name}"\r\nContent-Type: {content_type}\r\n\r\n').encode()
     body += data + f"\r\n--{boundary}--\r\n".encode()
     request = urllib.request.Request(
         server.rstrip("/") + "/inference",
