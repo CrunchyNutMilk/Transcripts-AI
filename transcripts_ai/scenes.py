@@ -40,6 +40,19 @@ _SCENE_HINTS: tuple[tuple[SceneType, re.Pattern[str]], ...] = (
 
 _COMBAT_START = _EVENT_PATTERNS[0][1]  # roll initiative
 _COMBAT_END = next(p for e, p in _EVENT_PATTERNS if e is GameEvent.COMBAT_END)
+# Signals that keep an open combat scene alive; without any of these for
+# COMBAT_STALL_ENTRIES turns, combat is considered over even if nobody said so
+# out loud (tables rarely announce "combat is over" explicitly).
+_COMBAT_ACTIVITY = tuple(
+    p for e, p in _EVENT_PATTERNS
+    if e in (
+        GameEvent.INITIATIVE, GameEvent.ATTACK_ROLL, GameEvent.SAVING_THROW,
+        GameEvent.DAMAGE, GameEvent.HEALING, GameEvent.CONDITION,
+        GameEvent.SPELL_CAST, GameEvent.MULTIATTACK, GameEvent.LEGENDARY_ACTION,
+        GameEvent.LAIR_ACTION, GameEvent.DEATH_SAVE,
+    )
+)
+COMBAT_STALL_ENTRIES = 60
 
 
 @dataclass
@@ -85,13 +98,19 @@ def segment_scenes(
 
     labels: list[SceneType] = []
     in_combat = False
+    since_combat_activity = 0
     signal_cache = [_entry_signals(e) for e in entries]
     for index, entry in enumerate(entries):
         if not in_combat and _COMBAT_START.search(entry.text):
             in_combat = True
+            since_combat_activity = 0
         if in_combat:
+            if any(p.search(entry.text) for p in _COMBAT_ACTIVITY):
+                since_combat_activity = 0
+            else:
+                since_combat_activity += 1
             labels.append(SceneType.COMBAT)
-            if _COMBAT_END.search(entry.text):
+            if _COMBAT_END.search(entry.text) or since_combat_activity >= COMBAT_STALL_ENTRIES:
                 in_combat = False
             continue
         # Majority vote over the local window, preferring specific signals.

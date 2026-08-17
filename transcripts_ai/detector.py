@@ -17,7 +17,13 @@ COMMON_WORDS = frozenset(
     """
     the a an i you he she it we they this that these those there here
     ah oh um uh hmm yeah yes no okay ok right well so anyway like just
-    what who where when why how which whose
+    what who where when why how which whose and but or nor for yet because
+    cause not now all thank thanks sorry get got does did do can could
+    will would should shall may might must unless really very alright
+    also then than too maybe please gonna wanna sure fine cool nice good
+    great god jesus christ damn hell fuck fucking shit crap wow whoa hey
+    if is are was were been being have has had let go come came went
+    look looks looking wait stop
     i'm i've i'll i'd you're you've we're we've they're don't can't won't
     it's that's there's let's he's she's what's who's didn't doesn't isn't
     monday tuesday wednesday thursday friday saturday sunday
@@ -94,6 +100,8 @@ def detect_names(
 
     def add(text: str, entry: TranscriptEntry, reason: str) -> None:
         text = text.strip().strip(".,;:!?\"'")
+        if text.endswith(("'s", "’s")):
+            text = text[:-2].rstrip()
         if not text:
             return
         key = " ".join(text.casefold().split())
