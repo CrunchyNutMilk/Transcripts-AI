@@ -19,7 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .dnd_patterns import assess_entry
+from .dnd_patterns import (
+    WORLD_FACT_MODES,
+    assess_entry,
+    assess_speaker_mode,
+    assess_time_status,
+)
 from .memory import CampaignMemory
 from .providers import ChatProvider, ValidationFailed, call_role
 from .schemas import (
@@ -31,6 +36,8 @@ from .schemas import (
     FactCategory,
     Provenance,
     ReviewItem,
+    SpeakerMode,
+    TimeStatus,
     Verdict,
 )
 from .transcript import TranscriptChunk
@@ -45,9 +52,16 @@ Rules you must follow exactly:
 - Distinguish in-game events from out-of-character chatter, jokes, planning and rules talk.
 - Prefer DM statements over player speculation.
 - Do not treat ordinary words, filler speech, or game mechanics as entities.
-Reply with ONLY JSON: {"facts": [{"statement": str, "category": str, "change_type": str,
-"entities": [str], "status": str, "confidence": float, "quote": str, "line_start": int,
-"line_end": int, "speaker": str, "importance": "low|medium|high|critical"}]}"""
+- Facts are structured triples: subject / relationship / object where possible.
+- time_status: happened|current|planned|negated|hypothetical|unknown — plans,
+  jokes and things that explicitly did not happen are NOT events.
+- speaker_mode: dm_narration|mechanical_result|npc_dialogue|pc_dialogue|player_statement|table_talk.
+  An NPC speaking through the DM confirms only what the NPC CLAIMS.
+Reply with ONLY JSON: {"facts": [{"statement": str, "subject": str, "relationship": str,
+"object": str, "category": str, "change_type": str, "entities": [str], "status": str,
+"time_status": str, "speaker_mode": str, "confidence": float, "quote": str,
+"line_start": int, "line_end": int, "speaker": str,
+"importance": "low|medium|high|critical"}]}"""
 
 _VERIFY_SYSTEM = """You are an independent D&D fact verifier. For each fact, check whether
 its quote genuinely supports the statement, using ONLY the provided sources.
@@ -92,6 +106,12 @@ def _validate_extraction_payload(payload: Any) -> list[str]:
             problems.append(f"{where}.quote missing")
         if not isinstance(item.get("entities", []), list):
             problems.append(f"{where}.entities must be a list")
+        time_status = item.get("time_status")
+        if time_status is not None and time_status not in {t.value for t in TimeStatus}:
+            problems.append(f"{where}.time_status invalid")
+        speaker_mode = item.get("speaker_mode")
+        if speaker_mode is not None and speaker_mode not in {m.value for m in SpeakerMode}:
+            problems.append(f"{where}.speaker_mode invalid")
     return problems
 
 
@@ -158,10 +178,35 @@ class FactExtractor:
             status = EpistemicStatus(item["status"])
             # Epistemic ceiling from the deterministic cue classifier.
             anchor = entry_by_line.get(line_start)
+            speaker_mode = SpeakerMode(item.get("speaker_mode") or "unclear")
             if anchor is not None:
                 ceiling = assess_entry(anchor).status
                 if ceiling.rank > status.rank:
                     status = ceiling
+                detected_mode = assess_speaker_mode(anchor)
+                if speaker_mode is SpeakerMode.UNCLEAR:
+                    speaker_mode = detected_mode
+                elif speaker_mode in WORLD_FACT_MODES and detected_mode not in WORLD_FACT_MODES:
+                    # The model claimed DM-narration authority the line does
+                    # not have; the deterministic classifier wins.
+                    speaker_mode = detected_mode
+
+            # NPC dialogue confirms only what the NPC claims — never a world
+            # fact on its own.
+            if speaker_mode is SpeakerMode.NPC_DIALOGUE and status.rank < EpistemicStatus.CHARACTER_BELIEF.rank:
+                status = EpistemicStatus.CHARACTER_BELIEF
+
+            # Time status: the deterministic cue classifier overrides a model
+            # that turned a plan or an abandoned action into an event.
+            time_status = TimeStatus(item.get("time_status") or "unknown")
+            detected_time = assess_time_status(quote)
+            if detected_time in (TimeStatus.NEGATED, TimeStatus.PLANNED, TimeStatus.HYPOTHETICAL):
+                time_status = detected_time
+            elif time_status is TimeStatus.UNKNOWN:
+                time_status = detected_time
+            if time_status in (TimeStatus.PLANNED, TimeStatus.HYPOTHETICAL, TimeStatus.NEGATED):
+                if status.rank < EpistemicStatus.UNCONFIRMED_THEORY.rank:
+                    status = EpistemicStatus.UNCONFIRMED_THEORY
 
             fact = Fact(
                 statement=str(item["statement"]).strip(),
@@ -170,6 +215,11 @@ class FactExtractor:
                 entities=[str(e).strip() for e in item.get("entities", []) if str(e).strip()],
                 status=status,
                 confidence=float(item["confidence"]),
+                subject=str(item.get("subject") or "").strip(),
+                relationship=str(item.get("relationship") or "").strip(),
+                object_=str(item.get("object") or "").strip(),
+                time_status=time_status,
+                speaker_mode=speaker_mode,
                 importance=str(item.get("importance", "medium")),
                 provenance=Provenance(
                     campaign_id=campaign_id,

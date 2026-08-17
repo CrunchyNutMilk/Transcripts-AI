@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-from .schemas import EpistemicStatus
+from .schemas import EpistemicStatus, SpeakerMode, TimeStatus
 from .transcript import TranscriptEntry
 
 
@@ -204,3 +204,82 @@ def assess_entry(entry: TranscriptEntry) -> EpistemicAssessment:
         return EpistemicAssessment(EpistemicStatus.UNCONFIRMED_THEORY, cues, True)
     # A player's plain declarative line: usually describing their own action.
     return EpistemicAssessment(EpistemicStatus.STRONGLY_SUPPORTED, cues or ["player_statement"], True)
+
+
+# ---------------------------------------------------------------------------
+# Time status — did it happen, or was it only planned / negated / hypothetical?
+# ---------------------------------------------------------------------------
+
+_NEGATION_CUES = re.compile(
+    r"\b(?:didn'?t|did not|don'?t|never|was going to|were going to|almost|"
+    r"changed (?:my|his|her|their) mind|decided? not to|instead of|"
+    r"would have|could have(?! to)|wouldn'?t have|nevermind|never mind)\b", re.I,
+)
+_PLAN_CUES = re.compile(
+    r"\b(?:we should|let'?s|we could|we will|we'?ll|going to|gonna|plan(?:ning)? to|"
+    r"tomorrow|next time|later we|before we go|intend to|i might|maybe we)\b", re.I,
+)
+_HYPOTHETICAL_CUES = re.compile(
+    r"\b(?:what if|imagine|hypothetically|suppose|in theory|if we had|"
+    r"would it work if|can (?:i|we|it)\b.*\?)", re.I,
+)
+_PAST_PRESENT_ACTION = re.compile(
+    r"\b(?:i (?:cast|attack|move|open|take|grab|drink|use|swing|shoot|stab)|"
+    r"(?:you|we) (?:enter|arrive|travel|find|receive|take|attack|see|hear|reach)|"
+    r"(?:hands?|gives?|gave|handed|took|entered|arrived|found|received|killed|"
+    r"defeated|died|opened) )\b", re.I,
+)
+
+
+def assess_time_status(text: str) -> TimeStatus:
+    """Deterministic time-status floor for one statement/evidence line.
+
+    Negation beats planning beats hypothetical beats plain action; a line
+    with none of those cues is UNKNOWN and the extractor's judgement stands.
+    """
+    if _NEGATION_CUES.search(text):
+        return TimeStatus.NEGATED
+    if _HYPOTHETICAL_CUES.search(text):
+        return TimeStatus.HYPOTHETICAL
+    if _PLAN_CUES.search(text):
+        return TimeStatus.PLANNED
+    if _PAST_PRESENT_ACTION.search(text):
+        return TimeStatus.HAPPENED
+    return TimeStatus.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# Speaker mode — the authority hierarchy for who is really talking
+# ---------------------------------------------------------------------------
+
+_QUOTED_SPEECH = re.compile(r"[\"“].+?[\"”]|\bsays?,|\bsaid,|\breplies?,|\basks?,")
+_MECHANICAL = re.compile(
+    r"\b(?:rolled? (?:a |an )?\d+|nat(?:ural)? (?:1|20)|takes? \d+ .*damage|"
+    r"that'?s a (?:hit|miss)|save (?:succeeds|fails)|dc \d+|\d+ to hit)\b", re.I,
+)
+
+
+def assess_speaker_mode(entry: TranscriptEntry, *, is_dm: bool | None = None) -> SpeakerMode:
+    """Classify who is actually speaking on this line.
+
+    The critical distinction: the DM narrating the world (can confirm facts)
+    versus the DM voicing an NPC (confirms only that the NPC *claims* it).
+    Quoted speech or dialogue verbs inside a DM line mark NPC dialogue.
+    """
+    dm = entry.is_dm if is_dm is None else is_dm
+    text = entry.text
+    if _JOKE_CUES.search(text) or _OOC_CUES.search(text):
+        return SpeakerMode.TABLE_TALK
+    if _MECHANICAL.search(text):
+        return SpeakerMode.MECHANICAL_RESULT
+    if dm:
+        if _QUOTED_SPEECH.search(text):
+            return SpeakerMode.NPC_DIALOGUE
+        return SpeakerMode.DM_NARRATION
+    if _QUOTED_SPEECH.search(text):
+        return SpeakerMode.PC_DIALOGUE
+    return SpeakerMode.PLAYER_STATEMENT
+
+
+# Speaker modes that may confirm objective world facts on their own.
+WORLD_FACT_MODES = frozenset({SpeakerMode.DM_NARRATION, SpeakerMode.MECHANICAL_RESULT})

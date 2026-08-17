@@ -24,7 +24,9 @@ from .extraction import (
 from .memory import CampaignMemory
 from .providers import RoleRegistry
 from .retrieval import ContextBuilder
+from .scenes import Scene, segment_scenes
 from .schemas import Fact, ReviewItem, SessionSummary, text_sha256
+from .session_context import SessionContext
 from .summarizer import SessionSummarizer, render_markdown
 from .transcript import chunk_transcript, parse_transcript, validate_chunks
 
@@ -45,6 +47,7 @@ class SessionReport:
     review_items: list[ReviewItem] = field(default_factory=list)
     summary: SessionSummary | None = None
     summary_markdown: str = ""
+    scenes: list[Scene] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -68,12 +71,20 @@ class SessionPipeline:
         transcript_path: str | Path,
         game_name: str,
         session_date: str,
+        session_context: SessionContext | None = None,
     ) -> SessionReport:
         path = Path(transcript_path)
         text = path.read_text(encoding="utf-8-sig")
         parsed = parse_transcript(text, source_path=str(path))
         chunks = chunk_transcript(parsed)
         validate_chunks(parsed, chunks)
+
+        # The mapping file is the strongest PC source: register mapped PCs
+        # before anything else so detection/resolution can rely on them.
+        if session_context is not None:
+            if session_context.campaign_id != campaign_id:
+                raise ValueError("session context belongs to a different campaign")
+            session_context.register_pcs(self.memory, actor="human:mapping-file")
 
         extractor = FactExtractor(self.registry.provider_for("extractor"), self.memory)
         verifier = FactVerifier(self.registry.provider_for("verifier"), self.memory)
@@ -84,6 +95,7 @@ class SessionPipeline:
             chunks_total=len(chunks),
             chunks_processed=0,
             chunks_skipped_resume=0,
+            scenes=segment_scenes(parsed.entries),
         )
         if parsed.unparsed_lines:
             report.warnings.append(

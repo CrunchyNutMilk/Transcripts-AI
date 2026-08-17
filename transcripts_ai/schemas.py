@@ -102,6 +102,9 @@ class FactCategory(str, Enum):
 class ChangeType(str, Enum):
     INTRODUCED = "introduced"
     UPDATED = "updated"
+    PROPOSED = "proposed"      # quest offered but not yet accepted
+    ACCEPTED = "accepted"      # quest explicitly accepted
+    ON_HOLD = "on_hold"
     COMPLETED = "completed"
     FAILED = "failed"
     ABANDONED = "abandoned"
@@ -115,6 +118,33 @@ class ChangeType(str, Enum):
     UNRESOLVED = "unresolved"
     CONFIRMED = "confirmed"
     MENTIONED = "mentioned"
+
+
+class TimeStatus(str, Enum):
+    """Did it actually happen? Plans and negated actions are not events."""
+
+    HAPPENED = "happened"
+    CURRENT = "current"
+    PLANNED = "planned"
+    NEGATED = "negated"          # explicitly did not happen / was abandoned
+    HYPOTHETICAL = "hypothetical"
+    UNKNOWN = "unknown"
+
+
+class SpeakerMode(str, Enum):
+    """Who is really speaking — the authority hierarchy for a statement.
+
+    DM narration can confirm world facts. An NPC speaking *through* the DM
+    only confirms that the NPC claims it — the NPC may be lying.
+    """
+
+    DM_NARRATION = "dm_narration"
+    MECHANICAL_RESULT = "mechanical_result"
+    NPC_DIALOGUE = "npc_dialogue"
+    PC_DIALOGUE = "pc_dialogue"
+    PLAYER_STATEMENT = "player_statement"
+    TABLE_TALK = "table_talk"
+    UNCLEAR = "unclear"
 
 
 class Verdict(str, Enum):
@@ -177,7 +207,13 @@ def stable_digest(payload: Any) -> str:
 
 @dataclass
 class Fact:
-    """A single extracted statement with evidence and epistemic standing."""
+    """A single extracted statement with evidence and epistemic standing.
+
+    ``subject`` / ``relationship`` / ``object_`` form the structured triple
+    ("Cloud" / "possesses" / "Potion of Greater Healing"); ``statement`` is
+    the readable sentence. ``time_status`` separates events that happened
+    from plans, hypotheticals and things that explicitly did not happen.
+    """
 
     statement: str
     category: FactCategory
@@ -187,6 +223,11 @@ class Fact:
     confidence: float            # 0.0 - 1.0
     provenance: Provenance
     fact_id: str = ""
+    subject: str = ""
+    relationship: str = ""
+    object_: str = ""
+    time_status: TimeStatus = TimeStatus.UNKNOWN
+    speaker_mode: SpeakerMode = SpeakerMode.UNCLEAR
     importance: str = "medium"   # low | medium | high | critical
     verdict: Verdict | None = None
     needs_review: bool = False
@@ -220,6 +261,8 @@ class Fact:
         payload["category"] = self.category.value
         payload["change_type"] = self.change_type.value
         payload["status"] = self.status.value
+        payload["time_status"] = self.time_status.value
+        payload["speaker_mode"] = self.speaker_mode.value
         payload["verdict"] = self.verdict.value if self.verdict else None
         return canonical_json(payload)
 
@@ -233,6 +276,8 @@ class Fact:
             category=FactCategory(data.pop("category")),
             change_type=ChangeType(data.pop("change_type")),
             status=EpistemicStatus(data.pop("status")),
+            time_status=TimeStatus(data.pop("time_status", "unknown")),
+            speaker_mode=SpeakerMode(data.pop("speaker_mode", "unclear")),
             verdict=Verdict(verdict) if verdict else None,
             **data,
         )

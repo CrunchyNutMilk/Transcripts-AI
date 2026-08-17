@@ -110,6 +110,33 @@ removes any learned row by ID with an audit entry; nothing is ever silently
 rewritten. The ledger doubles as the **verified dataset export** for optional
 future fine-tuning (human-decided rows only).
 
+## The staged evidence system (implemented)
+
+The engine never asks a model to "find every name and fact". Stages, each a
+separate tested module:
+
+| Stage | Module | Notes |
+|---|---|---|
+| 1. Session context | `session_context.py` | player→PC mapping authoritative; per-session overrides; campaign-scoped; DM identity |
+| 2. Parse Mapped transcript | `transcript.py` | Unmapped never read for editing, source never written |
+| 3. Scene segmentation | `scenes.py` | roleplay/travel/arrival/NPC talk/combat/loot/planning/rest/rules/OOC; stateful combat bounds; sustained-run OOC rule |
+| 4. Candidate detection | `detector.py` | suppression-biased rules; capitalisation alone never suffices |
+| 5. Name/alias resolution | `resolver.py` + `phonetics.py` | exact → alias → feedback history → edit-distance/phonetic/containment → explanation; length-tiered thresholds |
+| 6. Fact extraction | `extraction.py` (extractor role) | subject/relationship/object triples, time status, speaker mode, exact quote |
+| 7. Evidence gate | `schemas.ContextPackage.contains_quote` | deterministic; invented quotes rejected pre-storage |
+| 8. Independent verification | `extraction.py` (verifier role) | disagreement → review queue |
+| 9. Deterministic ceilings | `dnd_patterns.py` | joke/OOC→table_talk; NPC dialogue→character claim; planned/negated→never events |
+| 10. Contradiction detection | `extraction.py` + `memory.py` | link, never overwrite; human resolves; retcon support |
+| 11. Summary | `summarizer.py` | derived from verified ledger; confirmed/uncertain split; no-hallucination gate; initiative order only when spoken |
+| 12. Review queue | `review.py` + `memory.py` | Correct/Alias/New/Save for Review/Let AI Pick (advisory-only)/Don't Know Yet |
+| 13. Learning | `memory.py` feedback ledger | approved + rejected decisions remembered; reversible via `forget`; human-only canon |
+| 14. Confidence bands | `resolver.decide_band_action` | ≥0.95+strong evidence auto-link (existing entities only), 0.80 suggest, 0.60 review, else drop |
+
+Speaker-authority hierarchy (enforced in `dnd_patterns.assess_speaker_mode` +
+extraction ceilings): DM narration > mechanical result > NPC dialogue (claim
+only) > PC dialogue > player statement > table talk. "Arden says he works for
+the king" is stored as Arden's claim, never as world fact.
+
 ## Migration path (mirrors docs/PLAN.md stages)
 
 1. Engine developed and tested standalone in this repo (this codebase).

@@ -39,6 +39,46 @@ AUTO_SUGGEST_FLOOR = 0.55   # below this we don't even suggest
 CONFIDENT_FLOOR = 0.85      # at/above this the UI may preselect (never auto-apply)
 
 
+# -- confidence bands (configurable via env) ---------------------------------
+
+import os as _os
+from enum import Enum as _Enum
+
+
+class BandAction(str, _Enum):
+    AUTO_LINK = "auto_link"          # 0.95+ AND strong evidence: link to existing
+    SUGGEST = "suggest"              # 0.80-0.94: propose, request confirmation
+    SAVE_FOR_REVIEW = "save_for_review"  # 0.60-0.79
+    DROP = "drop"                    # below 0.60: do not create or alter anything
+
+
+def _band(name: str, default: float) -> float:
+    try:
+        return float(_os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+def decide_band_action(confidence: float, *, strong_evidence: bool = False) -> BandAction:
+    """Map a confidence score to the configured action band.
+
+    AUTO_LINK additionally requires ``strong_evidence`` (an exact match or a
+    human-approved alias) — a confident-sounding score alone never auto-links,
+    and auto-link only ever attaches to an EXISTING entity; creation always
+    goes through review.
+    """
+    auto = _band("ENGINE_BAND_AUTO_LINK", 0.95)
+    suggest = _band("ENGINE_BAND_SUGGEST", 0.80)
+    review = _band("ENGINE_BAND_REVIEW", 0.60)
+    if confidence >= auto and strong_evidence:
+        return BandAction.AUTO_LINK
+    if confidence >= suggest:
+        return BandAction.SUGGEST
+    if confidence >= review:
+        return BandAction.SAVE_FOR_REVIEW
+    return BandAction.DROP
+
+
 @dataclass
 class Suggestion:
     canonical: str
