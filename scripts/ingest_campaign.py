@@ -104,7 +104,8 @@ def main() -> int:
         if "transcript" in name and "mapped" in name:
             files.append(path)
             continue
-        head = path.read_text(encoding="utf-8-sig", errors="replace")[:300]
+        with open(path, encoding="utf-8-sig", errors="replace") as fh:
+            head = fh.read(300)
         if "type: transcript-mapped" in head:
             files.append(path)
     if not files:

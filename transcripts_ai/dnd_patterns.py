@@ -152,7 +152,7 @@ _PLANNING_CUES = re.compile(
 )
 _BELIEF_CUES = re.compile(
     r"\b(?:my character (?:thinks|believes)|in character|"
-    r"\w+ (?:believes|is convinced|assumes)) \b", re.I,
+    r"\w+ (?:believes|is convinced|assumes))\b", re.I,
 )
 _DM_HINT_CUES = re.compile(
     r"\b(?:you (?:notice|sense|feel|get the feeling)|something (?:seems|feels) "
@@ -236,7 +236,7 @@ _PAST_PRESENT_ACTION = re.compile(
     r"\b(?:i (?:cast|attack|move|open|take|grab|drink|use|swing|shoot|stab)|"
     r"(?:you|we) (?:enter|arrive|travel|find|receive|take|attack|see|hear|reach)|"
     r"(?:hands?|gives?|gave|handed|took|entered|arrived|found|received|killed|"
-    r"defeated|died|opened) )\b", re.I,
+    r"defeated|died|opened))\b", re.I,
 )
 
 

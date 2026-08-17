@@ -141,6 +141,22 @@ def build_native_summary(
             + ", ".join(f"{t.value} ({c} scenes)" for t, c in scene_mix.most_common(3))
         )
 
+    # NPCs/groups and locations named by this session's facts, in order seen.
+    npcs: dict[str, None] = {}
+    locations: dict[str, None] = {}
+    party_folded = {p.casefold() for p in party}
+    for fact in ordered:
+        bucket = None
+        if fact.category in (FactCategory.NPC, FactCategory.ALIAS):
+            bucket = npcs
+        elif fact.category is FactCategory.LOCATION:
+            bucket = locations
+        if bucket is None:
+            continue
+        for entity in fact.entities:
+            if entity.casefold() not in party_folded:
+                bucket.setdefault(entity, None)
+
     return SessionSummary(
         campaign_id=campaign_id,
         session_id=session_id,
@@ -149,5 +165,7 @@ def build_native_summary(
         party=party,
         sections=list(sections.values()),
         manifest_hash=manifest_hash,
+        npcs_and_groups=list(npcs),
+        locations=list(locations),
         generator=NATIVE_SUMMARIZER_VERSION,
     )

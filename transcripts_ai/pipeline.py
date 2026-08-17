@@ -108,6 +108,11 @@ class SessionPipeline:
             report.warnings.append(
                 f"{len(parsed.unparsed_lines)} line(s) did not parse as speaker turns"
             )
+        if not chunks:
+            report.warnings.append(
+                "no parseable speaker turns; nothing processed, no summary"
+            )
+            return report
 
         all_verified: list[Fact] = []
         for chunk in chunks:
@@ -115,10 +120,14 @@ class SessionPipeline:
             if self.memory.chunk_state(campaign_id, session_id, chunk.chunk_number,
                                        chunk_hash) == "done":
                 report.chunks_skipped_resume += 1
+                # Only genuinely verified facts re-enter the ledger on resume;
+                # disputed/needs-review facts were remembered too but must not
+                # be laundered into "verified" by a second run.
                 all_verified.extend(
                     f for f in self.memory.facts_for_session(campaign_id, session_id)
                     if f.provenance.line_start >= chunk.line_start
                     and f.provenance.line_end <= chunk.line_end
+                    and not f.needs_review
                 )
                 continue
 
@@ -180,7 +189,9 @@ class SessionPipeline:
         report.review_items.extend(summary_reviews)
         if summary is not None:
             report.summary = summary
-            report.summary_markdown = render_markdown(summary)
+            report.summary_markdown = render_markdown(
+                summary, npcs=summary.npcs_and_groups, locations=summary.locations
+            )
             self.memory.remember_summary(
                 campaign_id, session_id, report.summary_markdown,
                 summary.manifest_hash, actor=PIPELINE_VERSION,
@@ -235,6 +246,11 @@ class SessionPipeline:
             report.warnings.append(
                 f"{len(parsed.unparsed_lines)} line(s) did not parse as speaker turns"
             )
+        if not chunks:
+            report.warnings.append(
+                "no parseable speaker turns; nothing processed, no summary"
+            )
+            return report
 
         # Exact stored casing — the normaliser must never reconstruct names.
         known = frozenset(e.name for e in self.memory.entities(campaign_id))
@@ -288,7 +304,9 @@ class SessionPipeline:
             manifest_hash=summary_context.manifest_hash,
         )
         report.summary = summary
-        report.summary_markdown = render_markdown(summary)
+        report.summary_markdown = render_markdown(
+            summary, npcs=summary.npcs_and_groups, locations=summary.locations
+        )
         self.memory.remember_summary(
             campaign_id, session_id, report.summary_markdown,
             summary.manifest_hash, actor=PIPELINE_VERSION,

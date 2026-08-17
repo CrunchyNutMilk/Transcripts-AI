@@ -252,6 +252,16 @@ class CampaignMemory:
                         statement, campaign_id UNINDEXED, fact_id UNINDEXED
                     )"""
                 )
+                # Backfill: a DB written where FTS5 was unavailable has facts
+                # but an empty index; without this, search silently finds
+                # nothing once the DB moves to a build with FTS5.
+                fts_rows = c.execute("SELECT count(*) AS n FROM facts_fts").fetchone()["n"]
+                fact_rows = c.execute("SELECT count(*) AS n FROM facts").fetchone()["n"]
+                if fts_rows == 0 and fact_rows > 0:
+                    c.execute(
+                        "INSERT INTO facts_fts (statement, campaign_id, fact_id)"
+                        " SELECT statement, campaign_id, fact_id FROM facts"
+                    )
 
     # -- audit --------------------------------------------------------------
 
@@ -280,22 +290,35 @@ class CampaignMemory:
                 (entity.campaign_id, entity.name.casefold(), entity.kind.value),
             ).fetchone()
             if existing:
-                # Never let a weaker status downgrade a stronger record.
+                # Never let a weaker status downgrade a stronger record, and
+                # never let an empty upsert wipe stored description/attributes
+                # (re-registering PCs each session must not erase curated data).
+                old_row = self._conn.execute(
+                    "SELECT description, attributes_json FROM entities WHERE entity_id=?",
+                    (existing["entity_id"],),
+                ).fetchone()
                 old = EpistemicStatus(existing["status"])
                 status = entity.status if entity.status.stronger_than(old) else old
+                description = entity.description or old_row["description"]
+                merged_attributes = {
+                    **json.loads(old_row["attributes_json"]),
+                    **entity.attributes,
+                }
                 self._conn.execute(
                     "UPDATE entities SET description=?, vault_path=COALESCE(?, vault_path),"
                     " status=?, attributes_json=? WHERE entity_id=?",
                     (
-                        entity.description,
+                        description,
                         entity.vault_path,
                         status.value,
-                        canonical_json(entity.attributes),
+                        canonical_json(merged_attributes),
                         existing["entity_id"],
                     ),
                 )
                 entity.entity_id = existing["entity_id"]
                 entity.status = status
+                entity.description = description
+                entity.attributes = merged_attributes
             else:
                 self._conn.execute(
                     "INSERT INTO entities (entity_id, campaign_id, name, name_folded, kind,"
@@ -584,6 +607,12 @@ class CampaignMemory:
         ).fetchone()
         if row is None:
             raise MemoryError_(f"unknown contradiction {contradiction_id}")
+        linked = {row["fact_id"], row["conflicting_fact_id"]}
+        if winning_fact_id is not None and winning_fact_id not in linked:
+            raise MemoryError_(
+                f"winning_fact_id {winning_fact_id!r} is not one of the linked "
+                f"facts {sorted(linked)}"
+            )
         with self._conn:
             self._conn.execute(
                 "UPDATE contradictions SET resolved=1, resolution=? WHERE contradiction_id=?",

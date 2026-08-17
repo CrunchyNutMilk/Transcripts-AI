@@ -18,7 +18,9 @@ Every suggestion carries machine reasons + a plain-English explanation.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+from enum import Enum
 
 from .memory import CampaignMemory
 from .phonetics import damerau_levenshtein, phonetic_key, similarity_ratio
@@ -41,11 +43,8 @@ CONFIDENT_FLOOR = 0.85      # at/above this the UI may preselect (never auto-app
 
 # -- confidence bands (configurable via env) ---------------------------------
 
-import os as _os
-from enum import Enum as _Enum
 
-
-class BandAction(str, _Enum):
+class BandAction(str, Enum):
     AUTO_LINK = "auto_link"          # 0.95+ AND strong evidence: link to existing
     SUGGEST = "suggest"              # 0.80-0.94: propose, request confirmation
     SAVE_FOR_REVIEW = "save_for_review"  # 0.60-0.79
@@ -54,7 +53,7 @@ class BandAction(str, _Enum):
 
 def _band(name: str, default: float) -> float:
     try:
-        return float(_os.environ.get(name, default))
+        return float(os.environ.get(name, default))
     except ValueError:
         return default
 
@@ -87,6 +86,7 @@ class Suggestion:
     reasons: list[str] = field(default_factory=list)
     explanation: str = ""
     via_alias: str | None = None
+    band: BandAction = BandAction.SAVE_FOR_REVIEW
 
     @property
     def confident(self) -> bool:
@@ -103,6 +103,10 @@ class Resolution:
     @property
     def best(self) -> Suggestion | None:
         return self.suggestions[0] if self.suggestions else None
+
+    @property
+    def band_action(self) -> BandAction:
+        return self.best.band if self.best else BandAction.DROP
 
 
 def _fold(name: str) -> str:
@@ -131,19 +135,21 @@ class NameResolver:
         # 1. Approved alias — the strongest signal we have.
         alias = self.memory.resolve_alias(campaign_id, observed_clean)
         if alias is not None:
+            score = 1.0 if alias.human_approved else 0.9
             suggestion = Suggestion(
                 canonical=alias.canonical,
                 entity_id=alias.entity_id,
-                score=1.0 if alias.human_approved else 0.9,
+                score=score,
                 reasons=["approved_alias" if alias.human_approved else "engine_alias"],
                 explanation=(
                     f'"{observed_clean}" is a previously approved alias of '
                     f'"{alias.canonical}"' + (f" ({alias.reason})" if alias.reason else "")
                 ),
                 via_alias=alias.alias_id,
+                band=decide_band_action(score, strong_evidence=alias.human_approved),
             )
             return Resolution(observed=observed_clean, suggestions=[suggestion],
-                              needs_human=not alias.human_approved)
+                              needs_human=suggestion.band is not BandAction.AUTO_LINK)
 
         entities = self.memory.entities(campaign_id)
 
@@ -157,9 +163,12 @@ class NameResolver:
                     reasons=["exact_match"],
                     explanation=f'"{observed_clean}" exactly matches the known '
                                 f"{entity.kind.value} \"{entity.name}\"",
+                    band=decide_band_action(1.0, strong_evidence=True),
                 )
-                return Resolution(observed=observed_clean, suggestions=[suggestion],
-                                  needs_human=False)
+                return Resolution(
+                    observed=observed_clean, suggestions=[suggestion],
+                    needs_human=suggestion.band is not BandAction.AUTO_LINK,
+                )
 
         # 3. Fuzzy / phonetic / containment candidates.
         threshold = fuzzy_threshold(len(folded))
@@ -171,11 +180,16 @@ class NameResolver:
             if candidate is not None:
                 scored.append(candidate)
 
-        # 4. Feedback filter: drop suggestions the user already rejected.
+        # 4. Feedback filter, then banding: previously rejected suggestions
+        # and DROP-band scores never surface; fuzzy matches are never strong
+        # evidence, so AUTO_LINK is impossible here by construction.
         kept: list[Suggestion] = []
         for suggestion in scored:
             subject = f"{observed_clean}->{suggestion.canonical}"
             if self.memory.was_rejected_before(campaign_id, "correction_rejected", subject):
+                continue
+            suggestion.band = decide_band_action(suggestion.score, strong_evidence=False)
+            if suggestion.band is BandAction.DROP:
                 continue
             kept.append(suggestion)
         kept.sort(key=lambda s: (-s.score, _fold(s.canonical)))

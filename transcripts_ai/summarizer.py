@@ -177,6 +177,8 @@ class SessionSummarizer:
             party=[str(x) for x in payload["party"]],
             sections=sections,
             manifest_hash=context.manifest_hash,
+            npcs_and_groups=[str(x) for x in payload["npcs_and_groups"]],
+            locations=[str(x) for x in payload["locations"]],
             generator=SUMMARIZER_VERSION,
         )
         return summary, review_items

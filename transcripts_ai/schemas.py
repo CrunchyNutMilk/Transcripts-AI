@@ -466,6 +466,8 @@ class SessionSummary:
     party: list[str]
     sections: list[SummarySection]
     manifest_hash: str
+    npcs_and_groups: list[str] = field(default_factory=list)
+    locations: list[str] = field(default_factory=list)
     generator: str = "engine-summarizer"
     generator_version: str = "1"
 

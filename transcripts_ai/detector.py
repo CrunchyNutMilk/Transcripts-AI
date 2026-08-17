@@ -97,6 +97,14 @@ def detect_names(
     campaign entities are tracked even in lowercase or mid-sentence positions.
     """
     found: dict[str, DetectedName] = {}
+    known_pattern = None
+    if known_names:
+        known_pattern = re.compile(
+            r"\b("
+            + "|".join(re.escape(n) for n in sorted(known_names, key=len, reverse=True))
+            + r")\b",
+            re.IGNORECASE,
+        )
 
     def add(text: str, entry: TranscriptEntry, reason: str) -> None:
         text = text.strip().strip(".,;:!?\"'")
@@ -121,11 +129,11 @@ def detect_names(
     for entry in entries:
         text = entry.text
 
-        # Known campaign names, any casing, any position.
-        lowered = f" {text.casefold()} "
-        for known in known_names:
-            if f" {known} " in lowered or lowered.strip().startswith(known):
-                add(known, entry, "known_entity_mention")
+        # Known campaign names, any casing, any position — word-bounded so
+        # "cloud," matches but "cloudy" never does.
+        if known_pattern is not None:
+            for match in known_pattern.finditer(text):
+                add(match.group(1).casefold(), entry, "known_entity_mention")
 
         # Introduction/travel phrasing — the strongest new-name signals.
         for pattern, reason in INTRODUCTION_PATTERNS:
