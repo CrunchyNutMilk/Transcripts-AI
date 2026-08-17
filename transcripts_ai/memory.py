@@ -274,6 +274,46 @@ class CampaignMemory:
             (campaign_id, action, subject, canonical_json(detail or {}), actor, time.time()),
         )
 
+    def log_auto_correction(
+        self,
+        campaign_id: str,
+        session_id: str,
+        *,
+        original: str,
+        corrected: str,
+        confidence: float,
+        line_number: int,
+        source_path: str,
+        actor: str,
+    ) -> None:
+        """Audit-log an ordinary-word spelling correction.
+
+        Deliberately writes ONLY to the audit log under its own action so
+        these stay separate from entity corrections: no entity, no alias, no
+        fact, no review item is created for ordinary vocabulary.
+        """
+        with self._conn:
+            self._audit(
+                campaign_id, "auto_spell_correction",
+                f"{original} -> {corrected}", actor,
+                {
+                    "session_id": session_id,
+                    "original": original,
+                    "corrected": corrected,
+                    "confidence": confidence,
+                    "line": line_number,
+                    "source_path": source_path,
+                },
+            )
+
+    def auto_corrections(self, campaign_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM audit_log WHERE campaign_id=? AND action='auto_spell_correction'"
+            " ORDER BY audit_id DESC LIMIT ?",
+            (campaign_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def audit_entries(self, campaign_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             "SELECT * FROM audit_log WHERE campaign_id=? ORDER BY audit_id DESC LIMIT ?",

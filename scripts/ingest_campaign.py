@@ -335,6 +335,11 @@ def main() -> int:
         # Credibility gate: repeated across sessions, or a strong pattern.
         if session_count < 2 and not (strong & reasons):
             continue
+        # Ordinary vocabulary is never a review question: single common
+        # words without a strong naming signal are dropped outright.
+        from transcripts_ai.spellcheck import is_ordinary_word_candidate
+        if is_ordinary_word_candidate(display, reasons):
+            continue
         # Human previously said "not an entity" -> never propose again.
         rows = memory.feedback_for(campaign_id, "entity_misclassified", display)
         if rows and rows[-1]["accepted"]:

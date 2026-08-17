@@ -272,6 +272,47 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_spellcheck(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .spellcheck import SpellChecker
+    from .transcript import parse_transcript
+
+    path = Path(args.transcript)
+    name = path.name.casefold()
+    if "unmapped" in name or "mapped" not in name:
+        print("REFUSED: spelling corrections apply only to Mapped transcripts; "
+              "Transcript Unmapped is never modified.")
+        return 3
+    memory = _memory(args)
+    try:
+        checker = SpellChecker(memory)
+        parsed = parse_transcript(path.read_text(encoding="utf-8-sig"),
+                                  source_path=str(path))
+        corrections = checker.find_corrections(
+            parsed, args.campaign, min_confidence=args.min_confidence
+        )
+        for c in corrections:
+            print(f"line {c.line_number:5d}: {c.original} -> {c.corrected} "
+                  f"(confidence {c.confidence:.2f})")
+        if not corrections:
+            print("no ordinary-word corrections found")
+            return 0
+        if args.apply:
+            applied = checker.apply_corrections(
+                path, corrections, campaign_id=args.campaign,
+                session_id=args.session or path.stem,
+            )
+            print(f"applied {applied} correction(s) to {path.name}; "
+                  "audited as auto_spell_correction")
+        else:
+            print(f"{len(corrections)} correction(s) found (dry run — "
+                  "pass --apply to write them)")
+    finally:
+        memory.close()
+    return 0
+
+
 def cmd_train(args: argparse.Namespace) -> int:
     from .learner import SuggestionLearner
 
@@ -331,6 +372,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mapping")
     p.add_argument("--native", action="store_true")
     p.set_defaults(func=cmd_process)
+
+    p = sub.add_parser("spellcheck",
+                       help="auto-correct ordinary-word misspellings in a "
+                            "Mapped transcript (entity names untouched)")
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--transcript", required=True)
+    p.add_argument("--session", default=None)
+    p.add_argument("--apply", action="store_true",
+                   help="write corrections (default: dry run)")
+    from .spellcheck import DEFAULT_MIN_CONFIDENCE
+    p.add_argument("--min-confidence", type=float, default=DEFAULT_MIN_CONFIDENCE)
+    p.set_defaults(func=cmd_spellcheck)
 
     p = sub.add_parser("train", help="re-fit the suggestion learner from feedback")
     p.add_argument("--campaign", required=True)

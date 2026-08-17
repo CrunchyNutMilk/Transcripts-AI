@@ -103,6 +103,21 @@ dm_has_not_said` records why. **Important:** a `correct`/`alias`/`not-entity`
 decision is remembered — wrong ones can be undone via
 `python -m transcripts_ai audit` + `forget`, so don't agonise.
 
+## 4b. Optional: auto-fix ordinary-word misspellings in a Mapped transcript
+
+Ordinary vocabulary ("becuase" → "because") is corrected automatically —
+never sent to review, never made an entity. Names are protected: capitalised
+words, campaign entities/aliases (including phonetic and one-edit
+neighbours), repeated unknown terms, and playful coinages are left alone.
+Always dry-run first; corrections are audited as `auto_spell_correction`.
+Transcript Unmapped is refused outright.
+
+```powershell
+python -m transcripts_ai --db ...engine_memory.sqlite spellcheck `
+  --campaign "Heckuva Side Quest" --transcript "path\to\... Transcripts Mapped.md"
+# review the printed list, then add --apply to write
+```
+
 ## 5. Train the learner on your decisions (10 s)
 
 ```powershell
