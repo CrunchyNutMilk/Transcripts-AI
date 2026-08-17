@@ -29,8 +29,57 @@ def _memory(args: argparse.Namespace) -> CampaignMemory:
     return CampaignMemory(args.db)
 
 
+def load_session_mapping(path: str, campaign_id: str, session_id: str,
+                         game: str, session_date: str):
+    """Load a mapping JSON file into a SessionContext (see mapping.example.json)."""
+    import json
+
+    from .session_context import PlayerMapping, SessionContext
+
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if data.get("campaign") and data["campaign"] != campaign_id:
+        raise SystemExit(
+            f"mapping file is for campaign {data['campaign']!r}, not {campaign_id!r}"
+        )
+
+    def rows(key):
+        return [
+            PlayerMapping(str(r["player_id"]), r["player_label"], r["character_name"])
+            for r in data.get(key, [])
+        ]
+
+    return SessionContext(
+        campaign_id=campaign_id,
+        session_id=session_id,
+        game_name=game,
+        session_date=session_date,
+        dm_labels=frozenset(data.get("dm_labels") or ["DM"]),
+        mappings=rows("players"),
+        overrides=rows("overrides"),
+    )
+
+
 def cmd_process(args: argparse.Namespace) -> int:
     import os
+    from pathlib import Path
+
+    name = Path(args.transcript).name.casefold()
+    if "unmapped" in name or "unknown" in name:
+        print(
+            "REFUSED: permanent campaign memory only accepts Mapped transcripts.\n"
+            f"{args.transcript} looks unmapped. Run it through the bot's speaker\n"
+            "mapping first, or evaluate it with scripts/transcribe_session.py\n"
+            "--process (disposable database)."
+        )
+        return 3
+
+    session_date = args.date or args.session
+    session_context = None
+    if args.mapping:
+        session_context = load_session_mapping(
+            args.mapping, args.campaign, args.session, args.game, session_date
+        )
 
     memory = _memory(args)
     use_native = args.native or not os.environ.get("AI_ROLE_EXTRACTOR")
@@ -42,7 +91,8 @@ def cmd_process(args: argparse.Namespace) -> int:
                 session_id=args.session,
                 transcript_path=args.transcript,
                 game_name=args.game,
-                session_date=args.date or args.session,
+                session_date=session_date,
+                session_context=session_context,
             )
         else:
             pipeline = SessionPipeline(memory, RoleRegistry())
@@ -51,7 +101,8 @@ def cmd_process(args: argparse.Namespace) -> int:
                 session_id=args.session,
                 transcript_path=args.transcript,
                 game_name=args.game,
-                session_date=args.date or args.session,
+                session_date=session_date,
+                session_context=session_context,
             )
     finally:
         memory.close()
@@ -145,6 +196,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             coordinator.save_for_review(item, actor=actor)
         elif args.action == "dont-know":
             coordinator.dont_know_yet(item, reason=args.reason or "other", actor=actor)
+        elif args.action == "let-ai-pick":
+            recommendation = coordinator.let_ai_pick(item)
+            print(f"AI suggestion (NOT applied): {recommendation.action.value}"
+                  + (f' -> "{recommendation.choice}"' if recommendation.choice else "")
+                  + f"  confidence {recommendation.confidence:.2f}")
+            print(f"  why: {recommendation.reason}")
+            print("  apply it yourself with --action correct/alias if you agree")
+            return 0
         print(f"{args.action}: {item.subject}"
               + (f" -> {args.canonical}" if args.canonical else ""))
     finally:
@@ -254,8 +313,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--session", required=True)
     p.add_argument("--transcript", required=True)
     p.add_argument("--game", required=True)
-    p.add_argument("--date", default=str(date.today()))
+    p.add_argument("--date", default=None,
+                   help="session date; defaults to --session")
     p.add_argument("--summary-out")
+    p.add_argument("--mapping", help="player mapping JSON (see mapping.example.json)")
     p.add_argument("--native", action="store_true",
                    help="force the self-contained engine even if AI_ROLE_* is set")
     p.set_defaults(func=cmd_process)
@@ -267,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--game", required=True)
     p.add_argument("--date", default=None)
     p.add_argument("--summary-out")
+    p.add_argument("--mapping")
     p.add_argument("--native", action="store_true")
     p.set_defaults(func=cmd_process)
 
@@ -283,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--item", required=True, help="item id or list number")
     p.add_argument("--action", required=True,
                    choices=["correct", "alias", "new", "not-entity", "reject",
-                            "defer", "dont-know"])
+                            "defer", "dont-know", "let-ai-pick"])
     p.add_argument("--canonical", help="target name for correct/alias/reject")
     p.add_argument("--kind", help="entity kind for new (pc, npc, location, ...)")
     p.add_argument("--vault-path", help="vault page path for new")

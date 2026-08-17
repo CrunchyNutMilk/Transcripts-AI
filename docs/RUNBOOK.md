@@ -13,29 +13,51 @@ git clone https://github.com/CrunchyNutMilk/Transcripts-AI.git
 cd Transcripts-AI
 git checkout claude/transcript-ai-pipeline-gc4vpn
 pip install pytest
-python -m pytest tests/ -q        # expect: 162+ passed
+python -m pytest tests/ -q        # expect: all tests pass (CI runs the same suite)
 ```
 
-## 2. Build campaign memory from your real vault (2 min)
+## 2. Write your player mapping (5 min, do this BEFORE ingesting)
 
-Point at the campaign's transcripts folder — it walks subfolders, reads only
-`* Transcripts Mapped*.md`, and never touches Unmapped files.
+Copy `mapping.example.json` to somewhere **outside the repo** (it's
+git-ignored anyway, but keep campaign data out of the clone) and fill in the
+real Discord IDs, speaker labels and character names, plus who the DM labels
+are. The mapping file is the authoritative source of PCs — with it, the
+engine never guesses PCs from speaker frequency.
+
+```powershell
+copy mapping.example.json C:\Users\neill\Documents\engine\mapping.json
+notepad C:\Users\neill\Documents\engine\mapping.json
+```
+
+## 3. Build campaign memory from your real vault (2 min)
+
+Keep the database **outside the repo** too. The ingester walks subfolders,
+reads only `* Transcripts Mapped*.md`, and never touches Unmapped files.
 
 ```powershell
 python scripts/ingest_campaign.py `
   --data-dir "C:\Users\neill\Documents\<your vault>\<campaign folder>\01 - Transcript Mapped" `
-  --db engine_memory.sqlite `
+  --db C:\Users\neill\Documents\engine\engine_memory.sqlite `
   --campaign "Heckuva Side Quest" `
-  --report heckuva_report.md
+  --mapping C:\Users\neill\Documents\engine\mapping.json `
+  --report C:\Users\neill\Documents\engine\heckuva_report.md
 ```
 
 Open `heckuva_report.md` — same shape as the one from the cloud session.
 
-## 3. Clear the review queue (10–15 min, the highest-value step)
+## 4. Clear the review queue (10–15 min, the highest-value step)
+
+All `python -m transcripts_ai` commands below take the database first:
+`python -m transcripts_ai --db C:\Users\neill\Documents\engine\engine_memory.sqlite <command> ...`
+(shortened to `--db ...` in the examples).
 
 ```powershell
-python -m transcripts_ai reviews --campaign "Heckuva Side Quest"
+python -m transcripts_ai --db C:\Users\neill\Documents\engine\engine_memory.sqlite `
+  reviews --campaign "Heckuva Side Quest"
 ```
+
+Not sure about an item? `--action let-ai-pick` gives the engine's own
+advisory recommendation (learner-scored, explained, never applied).
 
 Act on items with `resolve`. **The decisions are yours** — the commands below
 are prepared for the items the cloud pass found, assuming the obvious answer
@@ -81,7 +103,7 @@ dm_has_not_said` records why. **Important:** a `correct`/`alias`/`not-entity`
 decision is remembered — wrong ones can be undone via
 `python -m transcripts_ai audit` + `forget`, so don't agonise.
 
-## 4. Train the learner on your decisions (10 s)
+## 5. Train the learner on your decisions (10 s)
 
 ```powershell
 python -m transcripts_ai train --campaign "Heckuva Side Quest"
@@ -90,38 +112,54 @@ python -m transcripts_ai train --campaign "Heckuva Side Quest"
 Needs ≥8 decisions including some rejections; run it again after every review
 session. `entities --campaign ...` shows what the engine now knows.
 
-## 5. Re-ingest so approved names deepen the index (1 min)
+## 6. Re-ingest so approved names deepen the index (1 min)
 
 ```powershell
 python scripts/ingest_campaign.py --data-dir "...\01 - Transcript Mapped" `
-  --db engine_memory.sqlite --campaign "Heckuva Side Quest" --report heckuva_report2.md
+  --db C:\Users\neill\Documents\engine\engine_memory.sqlite --campaign "Heckuva Side Quest" --report heckuva_report2.md
 ```
 
 Resolved items stay resolved; the report should now show fewer unknowns.
 
-## 6. Transcribe + process the two new sessions (2026-08-09, 2026-08-16)
+## 7. Transcribe or evaluate the two new sessions (2026-08-09, 2026-08-16)
 
 Start your whisper.cpp server (the bot's usual one), then:
+
+**The production path (recommended):** run both sessions through the bot as
+usual so speakers get mapped, then feed the Mapped transcripts into permanent
+memory with your mapping file:
+
+```powershell
+python -m transcripts_ai --db C:\Users\neill\Documents\engine\engine_memory.sqlite `
+  process --campaign "Heckuva Side Quest" --session 2026-08-09 `
+  --game "Heckuva Side Quest" --date 2026-08-09 `
+  --mapping C:\Users\neill\Documents\engine\mapping.json `
+  --transcript "path\to\2026-08-09 ... Transcripts Mapped.md" `
+  --summary-out C:\Users\neill\Documents\engine\20260809_summary.md
+```
+
+**The quick evaluation path (optional):** transcribe the raw audio without
+the bot. Speakers come out as `Unknown:`, so this writes to a **disposable
+evaluation database** (`<out>_eval.sqlite`) automatically — it can never
+touch your permanent campaign memory, and `process` refuses unmapped files.
 
 ```powershell
 python scripts/transcribe_session.py `
   --backend whisper-cpp --server http://127.0.0.1:8178 `
-  --out "20260809_unmapped.md" --process `
+  --out C:\Users\neill\Documents\engine\20260809_unmapped.md --process `
   --campaign "Heckuva Side Quest" --session 2026-08-09 `
-  --game "Heckuva Side Quest" --db engine_memory.sqlite `
+  --game "Heckuva Side Quest" `
   "path\to\20260809*Part*.mp3"
 ```
 
 Notes:
+- The script expands `*` wildcards itself, so the quoted pattern works in
+  PowerShell as written.
 - If the server rejects MP3 (some builds want 16 kHz WAV), convert first:
   `ffmpeg -i in.mp3 -ar 16000 -ac 1 out.wav` — the script accepts WAV too.
   Or use `--backend faster-whisper` after `pip install faster-whisper`.
-- This quick path has **no speaker names** (lines are `Unknown:`). For full
-  quality, run the session through the bot as usual and point
-  `python -m transcripts_ai process` at the resulting Transcripts Mapped file
-  instead — that is the intended production path.
 
-## 7. Inspect what came out
+## 8. Inspect what came out
 
 ```powershell
 python -m transcripts_ai facts --campaign "Heckuva Side Quest" --session 2026-08-09

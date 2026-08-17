@@ -174,12 +174,14 @@ class ReviewCoordinator:
         return resolved
 
     def let_ai_pick(self, item: ReviewItem) -> AIRecommendation:
-        """Advisory recommendation. Never applies anything."""
+        """Advisory recommendation. Never applies anything.
+
+        With no external reviewer configured, the engine's own trained
+        suggestion learner scores the offered candidates and explains its
+        pick feature-by-feature — fully self-contained.
+        """
         if self.reviewer is None:
-            return AIRecommendation(
-                action=ReviewAction.DONT_KNOW_YET, choice=None, confidence=0.0,
-                reason="no reviewer role configured",
-            )
+            return self._native_pick(item)
         offered = [str(s.get("canonical") or s.get("choice") or "") for s in item.suggestions]
         offered = [o for o in offered if o]
 
@@ -222,6 +224,44 @@ class ReviewCoordinator:
             choice=payload.get("choice"),
             confidence=float(payload["confidence"]),
             reason=str(payload["reason"]),
+        )
+
+    def _native_pick(self, item: ReviewItem) -> AIRecommendation:
+        from .learner import SuggestionLearner
+
+        offered = [str(s.get("canonical") or "") for s in item.suggestions]
+        offered = [o for o in offered if o]
+        if not offered:
+            return AIRecommendation(
+                action=ReviewAction.DONT_KNOW_YET, choice=None, confidence=0.0,
+                reason="no candidates offered; likely a new entity or noise "
+                       "— needs your judgement",
+            )
+        learner = SuggestionLearner(self.memory)
+        scored = []
+        for candidate in offered:
+            probability, contributions = learner.score(
+                item.campaign_id, item.subject, candidate
+            )
+            top = sorted(
+                (f for f in contributions.items() if f[0] != "bias" and f[1] != 0),
+                key=lambda kv: -abs(kv[1]),
+            )[:3]
+            scored.append((probability, candidate, top))
+        scored.sort(key=lambda t: -t[0])
+        probability, best, top = scored[0]
+        reasons = ", ".join(f"{name} ({value:+.2f})" for name, value in top)
+        if probability < 0.5:
+            return AIRecommendation(
+                action=ReviewAction.DONT_KNOW_YET, choice=None,
+                confidence=round(probability, 3),
+                reason=f'no offered candidate scores well (best "{best}" at '
+                       f"{probability:.2f}; {reasons})",
+            )
+        return AIRecommendation(
+            action=ReviewAction.CORRECT, choice=best,
+            confidence=round(probability, 3),
+            reason=f'learner favours "{best}" ({probability:.2f}): {reasons}',
         )
 
     # -- helpers ------------------------------------------------------------

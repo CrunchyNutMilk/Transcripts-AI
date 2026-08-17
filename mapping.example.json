@@ -1,0 +1,15 @@
+{
+  "campaign": "Heckuva Side Quest",
+  "dm_labels": ["DM", "NorthTitan"],
+  "players": [
+    {"player_id": "000000000000000000", "player_label": "Diego the Bear", "character_name": "Diego"},
+    {"player_id": "111111111111111111", "player_label": "Jenx", "character_name": "Jinx"},
+    {"player_id": "222222222222222222", "player_label": "Ghomra", "character_name": "Ghomra"},
+    {"player_id": "333333333333333333", "player_label": "Gomph", "character_name": "Gomph"},
+    {"player_id": "444444444444444444", "player_label": "Billy", "character_name": "Billy"},
+    {"player_id": "555555555555555555", "player_label": "Boblin Thee 7enth", "character_name": "Boblin"}
+  ],
+  "overrides": [
+    {"player_id": "111111111111111111", "player_label": "Jenx", "character_name": "Guest Wizard"}
+  ]
+}

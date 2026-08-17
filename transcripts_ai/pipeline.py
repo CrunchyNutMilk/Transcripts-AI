@@ -236,7 +236,8 @@ class SessionPipeline:
                 f"{len(parsed.unparsed_lines)} line(s) did not parse as speaker turns"
             )
 
-        known = frozenset(e.name.casefold() for e in self.memory.entities(campaign_id))
+        # Exact stored casing — the normaliser must never reconstruct names.
+        known = frozenset(e.name for e in self.memory.entities(campaign_id))
         facts = extract_native_facts(
             parsed.entries,
             campaign_id=campaign_id,

@@ -10,18 +10,19 @@ preference order:
 2. **faster-whisper** (pip install faster-whisper), CPU/GPU, model choice via
    --fw-model (e.g. base.en, small.en, large-v3).
 
-Output: a timestamped Unmapped-style transcript (speakers are "Unknown" —
-diarization stays with the bot; run this only when you want a quick offline
-pass without the full bot pipeline). Optionally continues straight into the
-engine's native processing with --process.
+Output: a timestamped transcript whose speakers are all "Unknown" —
+diarization stays with the bot. Because speakers are unknown, --process runs
+against a DISPOSABLE evaluation database, never your permanent campaign
+memory: Mapped transcripts are the only allowed input for that (use
+`python -m transcripts_ai process` after the bot maps speakers).
 
 Examples:
     python scripts/transcribe_session.py --out session.md part1.mp3 part2.mp3
     python scripts/transcribe_session.py --backend whisper-cpp \
-        --server http://127.0.0.1:8178 --out 20260809_unmapped.md *.mp3
+        --server http://127.0.0.1:8178 --out 20260809_unmapped.md "*.mp3"
     python scripts/transcribe_session.py --out s.md --process \
         --campaign "Heckuva Side Quest" --session 2026-08-09 \
-        --db engine_memory.sqlite --game "Heckuva Side Quest" *.mp3
+        --game "Heckuva Side Quest" "*Part*.mp3"
 """
 from __future__ import annotations
 
@@ -107,14 +108,32 @@ def main() -> int:
                         help="whisper.cpp server base URL")
     parser.add_argument("--fw-model", default="base.en")
     parser.add_argument("--process", action="store_true",
-                        help="run the engine's native pipeline afterwards")
+                        help="run the engine's native pipeline afterwards "
+                             "(EVALUATION ONLY: writes to a disposable database)")
     parser.add_argument("--campaign")
     parser.add_argument("--session")
     parser.add_argument("--game")
-    parser.add_argument("--db", default="engine_memory.sqlite")
+    parser.add_argument("--eval-db", default=None,
+                        help="disposable evaluation database "
+                             "(default: <out>_eval.sqlite). This script's "
+                             "transcripts have no speaker names, so they are "
+                             "never allowed into permanent campaign memory — "
+                             "run the Mapped transcript through "
+                             "`python -m transcripts_ai process` for that.")
     args = parser.parse_args()
 
-    parts = sort_parts(args.audio)
+    # Expand wildcards ourselves: PowerShell passes quoted globs literally.
+    import glob as _glob
+    expanded: list[str] = []
+    for raw in args.audio:
+        matches = _glob.glob(raw)
+        expanded.extend(matches if matches else [raw])
+    missing = [p for p in expanded if not Path(p).is_file()]
+    if missing:
+        print(f"audio file(s) not found: {', '.join(missing)}")
+        return 2
+
+    parts = sort_parts(expanded)
     print(f"{len(parts)} part(s): {', '.join(p.name for p in parts)}")
 
     lines: list[str] = []
@@ -147,7 +166,10 @@ def main() -> int:
         from transcripts_ai.memory import CampaignMemory
         from transcripts_ai.pipeline import SessionPipeline
 
-        memory = CampaignMemory(args.db)
+        eval_db = args.eval_db or str(out.with_name(out.stem + "_eval.sqlite"))
+        print(f"NOTE: unlabelled transcript -> evaluation database {eval_db} "
+              "(permanent campaign memory is Mapped-transcripts only)")
+        memory = CampaignMemory(eval_db)
         try:
             report = SessionPipeline(memory).process_session_native(
                 campaign_id=args.campaign,

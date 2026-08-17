@@ -2,14 +2,22 @@
 
 A campaign-aware D&D transcript intelligence engine: the self-contained
 replacement for the Summurizer bot's Luna/Terra/Sol AI layer. Pure Python
-3.11+, **zero runtime dependencies**, 162 tests.
+3.11+, **zero runtime dependencies**. Test count changes as the project
+grows — `python -m pytest tests/ -q` is the source of truth, and CI runs
+the suite on every push.
 
 **The engine runs with no outside AI at all.** The default (`native`) mode
 uses its own pattern extraction, extractive summarisation, phonetic/edit
 name resolution and a trainable scorer that learns from your review
-decisions — no OpenAI, no cloud, no local LLM required. External providers
-(`AI_ROLE_*`) exist only as an *optional* accelerator and can be ignored
-entirely.
+decisions — no OpenAI, no cloud, no local LLM required.
+
+Honest capability note: native mode is precision-first pattern
+intelligence. It will not catch every nuanced or indirect fact the way a
+large language model can — by design it prefers missing a fact over
+inventing one, and routes uncertainty to human review. Setting `AI_ROLE_*`
+switches the *whole pipeline* to provider mode (extractor, verifier and
+summariser roles must then all be configured); mixing native and provider
+stages per-role is not supported yet.
 
 ## Documentation
 
@@ -92,7 +100,7 @@ drop. New entities are always proposed for review, never auto-created.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q   # 146 tests, no network, no API keys
+python -m pytest tests/ -q   # no network, no API keys needed
 ```
 
 ## Switching providers

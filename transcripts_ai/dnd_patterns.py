@@ -96,13 +96,15 @@ def detect_events(entries: list[TranscriptEntry]) -> list[DetectedEvent]:
     return events
 
 
-def initiative_order(entries: list[TranscriptEntry]) -> list[tuple[str, int]]:
-    """Best-effort initiative order from lines near an initiative call.
+def initiative_evidence(
+    entries: list[TranscriptEntry],
+) -> list[tuple[str, int, TranscriptEntry]]:
+    """Initiative values actually spoken, each with its source entry.
 
-    Only returns names actually spoken with a number; empty when the table
-    never states the order out loud (the summary must then say "not stated").
+    Only returns names spoken with a number; empty when the table never
+    states the order out loud (the summary must then say "not stated").
     """
-    order: dict[str, int] = {}
+    found: dict[str, tuple[int, TranscriptEntry]] = {}
     window_active = 0
     for entry in entries:
         if _EVENT_PATTERNS[0][1].search(entry.text):
@@ -115,8 +117,15 @@ def initiative_order(entries: list[TranscriptEntry]) -> list[tuple[str, int]]:
             folded = name.strip().casefold()
             if folded in {"i", "he", "she", "it", "that", "who"}:
                 continue
-            order.setdefault(name.strip(), int(value))
-    return sorted(order.items(), key=lambda kv: -kv[1])
+            found.setdefault(name.strip(), (int(value), entry))
+    return sorted(
+        ((name, value, entry) for name, (value, entry) in found.items()),
+        key=lambda item: -item[1],
+    )
+
+
+def initiative_order(entries: list[TranscriptEntry]) -> list[tuple[str, int]]:
+    return [(name, value) for name, value, _entry in initiative_evidence(entries)]
 
 
 # ---------------------------------------------------------------------------

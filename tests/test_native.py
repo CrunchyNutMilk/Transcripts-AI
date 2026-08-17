@@ -87,7 +87,7 @@ class TestNativeExtractor:
 
     def test_known_entity_boosts_confidence(self):
         _, base = facts_for()
-        _, boosted = facts_for(known=frozenset({"moon sickle"}))
+        _, boosted = facts_for(known=frozenset({"Moon Sickle"}))
         base_fact = next(f for f in base if f.relationship == "gave")
         boosted_fact = next(f for f in boosted if f.relationship == "gave")
         assert boosted_fact.confidence > base_fact.confidence

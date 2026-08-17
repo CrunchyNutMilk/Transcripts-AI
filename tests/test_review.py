@@ -105,6 +105,9 @@ class TestLetAIPick:
         assert recommendation.action is ReviewAction.DONT_KNOW_YET
         assert recommendation.confidence == 0.0
 
-    def test_no_reviewer_configured(self, memory, item):
+    def test_no_reviewer_falls_back_to_native_learner(self, memory, item):
         recommendation = ReviewCoordinator(memory).let_ai_pick(item)
-        assert recommendation.action is ReviewAction.DONT_KNOW_YET
+        # Self-contained advisory pick from the learner — still never applied.
+        assert recommendation.applied is False
+        assert recommendation.choice == "Daragon"
+        assert len(memory.pending_reviews("camp-a")) == 1

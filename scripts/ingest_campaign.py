@@ -53,6 +53,8 @@ DATE_IN_NAME = re.compile(r"(\d{4})(\d{2})(\d{2})")
 PC_MIN_SESSIONS = 2
 PC_MIN_TURNS = 20
 DM_LABELS = {"dm", "gm", "dungeon master"}
+# Labels that must never be classified as PCs, whatever their frequency.
+NEVER_PC = DM_LABELS | {"unknown", "narrator", "system", "bot", "speaker"}
 
 
 def read_session(path: Path) -> tuple[str, str, str]:
@@ -85,6 +87,10 @@ def main() -> int:
     parser.add_argument("--campaign", required=True,
                         help="campaign id; frontmatter must match when present")
     parser.add_argument("--report", default=None)
+    parser.add_argument("--mapping", default=None,
+                        help="player mapping JSON (see mapping.example.json). "
+                             "When given, its characters are the authoritative "
+                             "PCs; unmapped frequent speakers only go to review.")
     args = parser.parse_args()
 
     # Walk the vault layout recursively; accept anything that is a Mapped
@@ -179,13 +185,63 @@ def main() -> int:
         interior_caps = sum(1 for ch in compact[1:] if ch.isupper())
         return " " not in label and interior_caps >= 1 and not label.istitle()
 
+    # Authoritative mapping, when provided: its characters ARE the PCs.
+    mapped_characters: dict[str, str] = {}   # folded label -> character name
+    mapped_dm_labels: set[str] = set()
+    if args.mapping:
+        import json
+        with open(args.mapping, encoding="utf-8") as f:
+            mapping_data = json.load(f)
+        if mapping_data.get("campaign") and mapping_data["campaign"] != campaign_id:
+            print(f"mapping file is for {mapping_data['campaign']!r}, not {campaign_id!r}")
+            return 2
+        mapped_dm_labels = {l.casefold() for l in mapping_data.get("dm_labels", [])}
+        for row in mapping_data.get("players", []) + mapping_data.get("overrides", []):
+            mapped_characters[row["player_label"].casefold()] = row["character_name"]
+            memory.upsert_entity(
+                EntityRecord(
+                    name=row["character_name"],
+                    kind=EntityKind.PC,
+                    campaign_id=campaign_id,
+                    status=EpistemicStatus.CONFIRMED_CANON,
+                    attributes={"player_id": str(row["player_id"]),
+                                "player_label": row["player_label"]},
+                ),
+                actor="human:mapping-file",
+            )
+            # Character names spoken as labels also resolve to themselves.
+            mapped_characters.setdefault(row["character_name"].casefold(),
+                                         row["character_name"])
+
     pc_labels: list[str] = []
     handle_labels: list[str] = []
     for folded, turns in speaker_turns.most_common():
         display = speaker_display[folded]
-        if folded in DM_LABELS:
+        if folded in NEVER_PC or folded in mapped_dm_labels:
             continue
         if len(speaker_sessions[folded]) < PC_MIN_SESSIONS and turns < PC_MIN_TURNS:
+            continue
+        if mapped_characters:
+            # Mapping is authoritative: speakers it covers are already PCs;
+            # anything else frequent goes to review, never auto-PC.
+            if folded in mapped_characters:
+                pc_labels.append(mapped_characters[folded])
+            else:
+                memory.enqueue_review(
+                    ReviewItem(
+                        campaign_id=campaign_id,
+                        session_id="ingest",
+                        item_type="entity",
+                        subject=display,
+                        reason=("frequent speaker not in the mapping file — "
+                                "guest PC, renamed character, or noise?"),
+                        evidence=[f"{turns} turns across sessions: "
+                                  + ", ".join(sorted(speaker_sessions[folded]))],
+                        confidence=0.6,
+                    ),
+                    actor=actor,
+                )
+                handle_labels.append(display)
             continue
         if looks_like_handle(display):
             kind, bucket = EntityKind.PLAYER, handle_labels
@@ -226,7 +282,7 @@ def main() -> int:
     # ---- speaker-label variant clustering (the Jinx/Jenx problem) ----------
     variant_pairs: list[tuple[str, str, str]] = []
     labels = [speaker_display[f] for f in speaker_turns
-              if f not in DM_LABELS]
+              if f not in NEVER_PC and f not in mapped_dm_labels]
     for i, a in enumerate(labels):
         for b in labels[i + 1:]:
             fa, fb = a.casefold(), b.casefold()
@@ -330,6 +386,7 @@ def main() -> int:
     ]
     for scene_type, count in scene_totals.most_common():
         lines.append(f"- {scene_type.value}: {100 * count / total_entries:.1f}%")
+    pc_labels = list(dict.fromkeys(pc_labels))
     lines += [
         "",
         "## Speakers registered as PCs (mapping-grade evidence)",

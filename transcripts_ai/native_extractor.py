@@ -21,7 +21,7 @@ from .dnd_patterns import (
     assess_entry,
     assess_speaker_mode,
     assess_time_status,
-    initiative_order,
+    initiative_evidence,
 )
 from .schemas import (
     ChangeType,
@@ -140,16 +140,21 @@ def _known_name_normaliser(known_entities: frozenset[str]):
     Whisper-style transcripts often lowercase proper names ("welcome to
     silverspire"); patterns anchored on capitals would miss them. Known
     campaign names are safe to re-case because a human already confirmed
-    them — this is exactly how memory makes extraction better every session.
+    them. The replacement is the entity's EXACT stored spelling — never a
+    reconstructed title-casing, which would mangle names like Nwen'sua or
+    Vel'Nadar. Stored names without any capital letter are left alone (they
+    could not anchor a pattern anyway, and rewriting them would only destroy
+    the transcript's own casing).
     """
-    if not known_entities:
+    replacements = [n for n in known_entities if any(c.isupper() for c in n)]
+    if not replacements:
         return lambda text: text
-    replacements = sorted(known_entities, key=len, reverse=True)
+    replacements.sort(key=len, reverse=True)
     pattern = re.compile(
         r"\b(" + "|".join(re.escape(name) for name in replacements) + r")\b",
         re.IGNORECASE,
     )
-    canonical = {name.casefold(): name.title() for name in replacements}
+    canonical = {name.casefold(): name for name in replacements}
 
     def normalise(text: str) -> str:
         return pattern.sub(lambda m: canonical[m.group(1).casefold()], text)
@@ -170,6 +175,7 @@ def extract_native_facts(
     facts: list[Fact] = []
     seen: set[tuple[str, int]] = set()
     normalise = _known_name_normaliser(known_entities)
+    known_folded = {n.casefold() for n in known_entities}
 
     for entry in entries:
         assessment = assess_entry(entry)
@@ -212,7 +218,7 @@ def extract_native_facts(
             if speaker_mode in WORLD_FACT_MODES:
                 confidence = min(confidence + 0.1, 0.95)
             for entity in entities:
-                if entity.casefold() in known_entities:
+                if entity.casefold() in known_folded:
                     confidence = min(confidence + 0.05, 0.97)
                     break
 
@@ -255,16 +261,18 @@ def extract_native_facts(
                 )
             )
 
-    # Initiative order is a session-level combat fact when actually spoken.
-    order = initiative_order(entries)
-    if order:
+    # Initiative order is a session-level combat fact when actually spoken;
+    # its evidence is the exact lines the values were spoken on.
+    evidence = initiative_evidence(entries)
+    if evidence:
+        source_entries = [entry for _n, _v, entry in evidence]
         facts.append(
             Fact(
                 statement="Initiative order (as spoken): "
-                + ", ".join(f"{n} ({v})" for n, v in order),
+                + ", ".join(f"{n} ({v})" for n, v, _e in evidence),
                 category=FactCategory.COMBAT,
                 change_type=ChangeType.CONFIRMED,
-                entities=[n for n, _ in order],
+                entities=[n for n, _v, _e in evidence],
                 status=EpistemicStatus.STRONGLY_SUPPORTED,
                 confidence=0.8,
                 subject="party",
@@ -277,9 +285,10 @@ def extract_native_facts(
                     session_id=session_id,
                     source_path=source_path,
                     source_hash=source_hash,
-                    line_start=entries[0].line_number,
-                    line_end=entries[-1].line_number,
-                    quote="initiative values spoken during the session",
+                    line_start=min(e.line_number for e in source_entries),
+                    line_end=max(e.line_number for e in source_entries),
+                    speaker=source_entries[0].speaker,
+                    quote=" | ".join(e.text[:120] for e in source_entries[:5]),
                     extractor=NATIVE_EXTRACTOR_VERSION,
                     extractor_version="1",
                 ),
