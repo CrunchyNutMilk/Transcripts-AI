@@ -30,18 +30,32 @@ def _memory(args: argparse.Namespace) -> CampaignMemory:
 
 
 def cmd_process(args: argparse.Namespace) -> int:
+    import os
+
     memory = _memory(args)
+    use_native = args.native or not os.environ.get("AI_ROLE_EXTRACTOR")
     try:
-        pipeline = SessionPipeline(memory, RoleRegistry())
-        report = pipeline.process_session(
-            campaign_id=args.campaign,
-            session_id=args.session,
-            transcript_path=args.transcript,
-            game_name=args.game,
-            session_date=args.date or args.session,
-        )
+        if use_native:
+            pipeline = SessionPipeline(memory)
+            report = pipeline.process_session_native(
+                campaign_id=args.campaign,
+                session_id=args.session,
+                transcript_path=args.transcript,
+                game_name=args.game,
+                session_date=args.date or args.session,
+            )
+        else:
+            pipeline = SessionPipeline(memory, RoleRegistry())
+            report = pipeline.process_session(
+                campaign_id=args.campaign,
+                session_id=args.session,
+                transcript_path=args.transcript,
+                game_name=args.game,
+                session_date=args.date or args.session,
+            )
     finally:
         memory.close()
+    print(f"mode: {'native (self-contained)' if use_native else 'provider-backed'}")
     print(f"chunks: {report.chunks_processed}/{report.chunks_total} "
           f"(resumed past {report.chunks_skipped_resume})")
     print(f"facts verified: {len(report.facts_verified)}  "
@@ -115,6 +129,25 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_train(args: argparse.Namespace) -> int:
+    from .learner import SuggestionLearner
+
+    memory = _memory(args)
+    try:
+        learner = SuggestionLearner(memory)
+        weights = learner.train(args.campaign)
+    finally:
+        memory.close()
+    if weights is None:
+        print("not enough human feedback yet (need >= 8 decisions with both "
+              "accepted and rejected examples); using default weights")
+        return 0
+    print("learner re-trained; weights:")
+    for feature, value in weights.items():
+        print(f"  {feature:22s} {value:+.3f}")
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     memory = _memory(args)
     try:
@@ -139,6 +172,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--game", required=True)
     p.add_argument("--date", default=str(date.today()))
     p.add_argument("--summary-out")
+    p.add_argument("--native", action="store_true",
+                   help="force the self-contained engine even if AI_ROLE_* is set")
     p.set_defaults(func=cmd_process)
 
     p = sub.add_parser("ingest", help="alias of process (memory building pass)")
@@ -148,7 +183,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--game", required=True)
     p.add_argument("--date", default=None)
     p.add_argument("--summary-out")
+    p.add_argument("--native", action="store_true")
     p.set_defaults(func=cmd_process)
+
+    p = sub.add_parser("train", help="re-fit the suggestion learner from feedback")
+    p.add_argument("--campaign", required=True)
+    p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("reviews", help="list pending review items")
     p.add_argument("--campaign", required=True)

@@ -22,6 +22,8 @@ from .extraction import (
     detect_memory_contradictions,
 )
 from .memory import CampaignMemory
+from .native_extractor import extract_native_facts
+from .native_summarizer import build_native_summary
 from .providers import RoleRegistry
 from .retrieval import ContextBuilder
 from .scenes import Scene, segment_scenes
@@ -55,7 +57,7 @@ class SessionPipeline:
     def __init__(
         self,
         memory: CampaignMemory,
-        registry: RoleRegistry,
+        registry: RoleRegistry | None = None,
         *,
         context_budget_chars: int = 24_000,
     ):
@@ -73,6 +75,11 @@ class SessionPipeline:
         session_date: str,
         session_context: SessionContext | None = None,
     ) -> SessionReport:
+        if self.registry is None:
+            raise RuntimeError(
+                "provider-backed processing needs a RoleRegistry; "
+                "use process_session_native() for the self-contained path"
+            )
         path = Path(transcript_path)
         text = path.read_text(encoding="utf-8-sig")
         parsed = parse_transcript(text, source_path=str(path))
@@ -149,6 +156,12 @@ class SessionPipeline:
         report.contradictions = detect_memory_contradictions(
             self.memory, campaign_id, all_verified, actor=PIPELINE_VERSION
         )
+        return self._finish_with_summary(report, campaign_id, session_id,
+                                         game_name, session_date, parsed,
+                                         chunks, all_verified)
+
+    def _finish_with_summary(self, report, campaign_id, session_id, game_name,
+                             session_date, parsed, chunks, all_verified):
 
         # Summary context: reuse the first chunk plus memory-derived sources.
         summarizer = SessionSummarizer(self.registry.provider_for("summarizer"), self.memory)
@@ -174,4 +187,109 @@ class SessionPipeline:
             )
         else:
             report.warnings.append("summary failed validation; queued for review")
+        return report
+
+    # ------------------------------------------------------------------
+    # Self-contained path: no external AI of any kind.
+    # ------------------------------------------------------------------
+
+    def process_session_native(
+        self,
+        *,
+        campaign_id: str,
+        session_id: str,
+        transcript_path: str | Path,
+        game_name: str,
+        session_date: str,
+        session_context: SessionContext | None = None,
+    ) -> SessionReport:
+        """Process a session with the engine's own intelligence only.
+
+        Pattern-extracted facts are evidence-correct by construction; the
+        deterministic verifier here is the contradiction detector plus the
+        confidence gate (low-confidence facts flow to the review queue rather
+        than memory as verified). The summary is extractive, so it cannot
+        contain anything unsourced.
+        """
+        path = Path(transcript_path)
+        text = path.read_text(encoding="utf-8-sig")
+        parsed = parse_transcript(text, source_path=str(path))
+        chunks = chunk_transcript(parsed)
+        validate_chunks(parsed, chunks)
+        scenes = segment_scenes(parsed.entries)
+
+        if session_context is not None:
+            if session_context.campaign_id != campaign_id:
+                raise ValueError("session context belongs to a different campaign")
+            session_context.register_pcs(self.memory, actor="human:mapping-file")
+
+        report = SessionReport(
+            campaign_id=campaign_id,
+            session_id=session_id,
+            chunks_total=len(chunks),
+            chunks_processed=len(chunks),
+            chunks_skipped_resume=0,
+            scenes=scenes,
+        )
+        if parsed.unparsed_lines:
+            report.warnings.append(
+                f"{len(parsed.unparsed_lines)} line(s) did not parse as speaker turns"
+            )
+
+        known = frozenset(e.name.casefold() for e in self.memory.entities(campaign_id))
+        facts = extract_native_facts(
+            parsed.entries,
+            campaign_id=campaign_id,
+            session_id=session_id,
+            source_path=str(path),
+            source_hash=parsed.source_hash,
+            known_entities=known,
+        )
+
+        verified: list[Fact] = []
+        for fact in facts:
+            if fact.confidence < 0.6:
+                fact.needs_review = True
+                fact.review_reason = "native extraction below confidence gate"
+                item = ReviewItem(
+                    campaign_id=campaign_id,
+                    session_id=session_id,
+                    item_type="fact",
+                    subject=fact.statement,
+                    reason=fact.review_reason,
+                    evidence=[fact.provenance.quote],
+                    confidence=fact.confidence,
+                )
+                self.memory.enqueue_review(item, actor="native-pipeline")
+                report.review_items.append(item)
+                report.facts_disputed.append(fact)
+            else:
+                verified.append(fact)
+            self.memory.remember_fact(fact, actor=PIPELINE_VERSION)
+
+        report.facts_verified = verified
+        report.contradictions = detect_memory_contradictions(
+            self.memory, campaign_id, verified, actor=PIPELINE_VERSION
+        )
+
+        summary_context = self.context_builder.build(
+            campaign_id, session_id, chunks[0], task="summarizer"
+        )
+        summary = build_native_summary(
+            self.memory,
+            campaign_id=campaign_id,
+            session_id=session_id,
+            game_name=game_name,
+            session_date=session_date,
+            parsed=parsed,
+            facts=facts,
+            scenes=scenes,
+            manifest_hash=summary_context.manifest_hash,
+        )
+        report.summary = summary
+        report.summary_markdown = render_markdown(summary)
+        self.memory.remember_summary(
+            campaign_id, session_id, report.summary_markdown,
+            summary.manifest_hash, actor=PIPELINE_VERSION,
+        )
         return report

@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 
 from .schemas import SchemaError, text_sha256
 
+FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.S)
+
 TIMESTAMP = r"(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?"
 LINE_RE = re.compile(
     rf"^\[{TIMESTAMP}\s*-\s*{TIMESTAMP}\]\s*-\s*(?P<speaker>[^:]+?):\s?(?P<text>.*)$"
@@ -68,6 +70,13 @@ def parse_transcript(text: str, *, source_path: str = "<memory>") -> ParsedTrans
     """
     entries: list[TranscriptEntry] = []
     unparsed: list[tuple[int, str]] = []
+    source_hash = text_sha256(text)
+    # YAML frontmatter is metadata, not dialogue; blank it out line-for-line so
+    # line numbers still match the original file exactly.
+    match = FRONTMATTER_RE.match(text)
+    if match:
+        blanked = "\n" * match.group(0).count("\n")
+        text = blanked + text[match.end():]
     lines = text.splitlines()
     for number, raw in enumerate(lines, start=1):
         line = raw.rstrip("\r")
@@ -105,7 +114,7 @@ def parse_transcript(text: str, *, source_path: str = "<memory>") -> ParsedTrans
         unparsed.append((number, line))
     return ParsedTranscript(
         source_path=source_path,
-        source_hash=text_sha256(text),
+        source_hash=source_hash,
         entries=entries,
         unparsed_lines=unparsed,
         total_lines=len(lines),

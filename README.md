@@ -1,8 +1,15 @@
 # Transcripts-AI
 
-A campaign-aware D&D transcript intelligence engine: the modular,
-provider-independent replacement for the Summurizer bot's Luna/Terra/Sol AI
-layer. Pure Python 3.11+, **zero runtime dependencies**, 146 tests.
+A campaign-aware D&D transcript intelligence engine: the self-contained
+replacement for the Summurizer bot's Luna/Terra/Sol AI layer. Pure Python
+3.11+, **zero runtime dependencies**, 162 tests.
+
+**The engine runs with no outside AI at all.** The default (`native`) mode
+uses its own pattern extraction, extractive summarisation, phonetic/edit
+name resolution and a trainable scorer that learns from your review
+decisions — no OpenAI, no cloud, no local LLM required. External providers
+(`AI_ROLE_*`) exist only as an *optional* accelerator and can be ignored
+entirely.
 
 ## Documentation
 
@@ -54,16 +61,16 @@ For each session it runs the staged evidence pipeline — never one big
 ## Usage
 
 ```bash
-# Configure roles (any mix of cloud and local):
-export AI_ROLE_EXTRACTOR="openai:gpt-5.2-mini"
-export AI_ROLE_VERIFIER="openai:gpt-5.2-mini"
-export AI_ROLE_SUMMARIZER="openai:gpt-5.2"
-export AI_ROLE_REVIEWER="openai:gpt-5.2"
-export OPENAI_API_KEY="sk-..."
+# Default: fully self-contained, no configuration needed.
+# (Setting AI_ROLE_* switches individual stages to a provider; --native
+#  forces the self-contained path regardless.)
 
-# Or run fully local (Ollama / llama.cpp server / LM Studio):
-export LOCAL_AI_BASE_URL="http://127.0.0.1:11434/v1"
-export AI_ROLE_EXTRACTOR="local:qwen3-32b"
+# Build campaign memory from your existing Mapped transcripts:
+python scripts/ingest_campaign.py --data-dir "path/to/mapped" \
+  --db engine_memory.sqlite --campaign "Heckuva Side Quest" --report report.md
+
+# Re-fit the suggestion learner after review sessions:
+python -m transcripts_ai train --campaign "Heckuva Side Quest"
 
 # Process a session (memory lives in engine_memory.sqlite):
 python -m transcripts_ai process \
