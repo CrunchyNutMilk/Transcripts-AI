@@ -769,6 +769,14 @@ class CampaignMemory:
                         {"kind": kind, "accepted": accepted})
         return int(cur.lastrowid)
 
+    def all_feedback(self, campaign_id: str) -> list[dict[str, Any]]:
+        """Every feedback row for a campaign, oldest first (training export)."""
+        rows = self._conn.execute(
+            "SELECT * FROM feedback WHERE campaign_id=? ORDER BY created_at, feedback_id",
+            (campaign_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def feedback_for(self, campaign_id: str, kind: str, subject: str) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             "SELECT * FROM feedback WHERE campaign_id=? AND kind=? AND subject_folded=?"
