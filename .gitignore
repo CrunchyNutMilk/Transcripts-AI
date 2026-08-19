@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Engine state — never commit campaign memory or evaluation databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Campaign material — transcripts, recordings, notes and generated reports
+# must never land in this public repository
+*Transcript*Mapped*.md
+*Transcript*Unmapped*.md
+*.mp3
+*.wav
+*.m4a
+*.flac
+*_report*.md
+*_summary.md
+*unmapped*.md
+campaign_data/
+recordings/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+mapping*.json
+!mapping.example.json
+
+# OS noise
+Thumbs.db
+.DS_Store

@@ -1,0 +1,13 @@
+[project]
+name = "transcripts-ai"
+version = "0.1.0"
+description = "Campaign-aware D&D transcript intelligence engine (Luna/Terra/Sol replacement)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []  # stdlib only by design; providers speak HTTP directly
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
