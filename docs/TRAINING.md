@@ -91,6 +91,42 @@ Non-negotiables:
 - **A frozen evaluation set exists before the loop first runs.** Otherwise
   "getting better" is the loop grading its own homework.
 
+### Implemented so far (`python -m transcripts_ai.lab`)
+
+Layer 1 (measurement): `export-records`, `tally`, `split`, `make-bank`,
+`score`. Layer 2a (the teacher panel):
+
+```powershell
+# who is on the panel (no API calls)
+$env:TEACHERS = "openai:gpt-5-mini,anthropic:claude-sonnet-5,gemini:gemini-2.5-pro,local:llama3.1"
+python -m transcripts_ai.lab teachers
+
+# preview the exact prompt the panel would send (no API calls)
+python -m transcripts_ai.lab panel --db campaign.sqlite --campaign heckuva `
+    --out-queue queue.jsonl --out-records banked.jsonl --dry-run
+
+# run the panel over pending review items (default cap: 25 items/run)
+python -m transcripts_ai.lab panel --db campaign.sqlite --campaign heckuva `
+    --out-queue queue.jsonl --out-records banked.jsonl
+
+# score any teacher on the same bank as the memory baseline
+python -m transcripts_ai.lab score --db campaign.sqlite --campaign heckuva `
+    --bank bank.jsonl --answerer teacher:anthropic --history history.jsonl
+```
+
+Panel mechanics as built: each pending review item gets one vote from the
+engine's resolver (free, deterministic) plus one from every configured
+teacher. Unanimous accept on the same name **and** an evidence-gate pass
+(the name must already exist in campaign memory; agreeing on an invented
+name is still an invented name) → banked to `banked.jsonl` with
+`actor="panel:…"` so it can never be mistaken for a human decision.
+Unanimous reject → banked hard negative. Anything else — a split, an
+uncertain vote, an abstention leaving fewer than two votes, a gate
+failure — lands in `queue.jsonl` pre-answered with every opinion. The
+panel never writes to campaign memory; review items stay yours to
+resolve. Missing API keys just shrink the panel, and a teacher that
+errors or returns garbage becomes an abstention, never a crash.
+
 ## Question-based testing
 
 - **Post-session quiz** — generate ~10 questions from extracted facts, post

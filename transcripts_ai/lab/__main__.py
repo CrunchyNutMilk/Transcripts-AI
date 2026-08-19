@@ -1,23 +1,35 @@
-"""Training-lab CLI (Layer 1).
+"""Training-lab CLI.
+
+Layer 1 (measurement):
 
     python -m transcripts_ai.lab export-records --db <db> --campaign <c> --out records.jsonl
     python -m transcripts_ai.lab tally          --records records.jsonl
     python -m transcripts_ai.lab split          --records records.jsonl --frozen s1,s2
     python -m transcripts_ai.lab make-bank      --db <db> --campaign <c> --out bank.jsonl
     python -m transcripts_ai.lab score          --db <db> --campaign <c> --bank bank.jsonl \
-        [--history scorecard_history.jsonl] [--report scorecard.md]
+        [--answerer memory|teacher:<name>] [--history history.jsonl] [--report scorecard.md]
 
-Layer 1 is measurement only: nothing here writes to campaign memory,
-transcripts, or the vault.
+Layer 2a (teacher panel; needs TEACHERS env or --teachers):
+
+    python -m transcripts_ai.lab teachers       # who is configured, zero network
+    python -m transcripts_ai.lab panel          --db <db> --campaign <c> \
+        --out-queue queue.jsonl --out-records banked.jsonl [--limit 25] [--dry-run]
+
+Nothing in the lab writes to campaign memory, transcripts, or the vault.
+The panel reads pending review items and writes JSONL files only; review
+items stay unresolved until a human resolves them.
 """
 from __future__ import annotations
 
 import argparse
+import os
 
 from ..memory import CampaignMemory
+from . import panel as panel_mod
 from . import records as records_mod
 from . import scorecard as scorecard_mod
-from .answerers import memory_answerer
+from .answerers import memory_answerer, teacher_answerer
+from .teachers import discover_teachers
 
 
 def cmd_export_records(args: argparse.Namespace) -> int:
@@ -85,13 +97,30 @@ def cmd_make_bank(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pick_answerer(memory: CampaignMemory, campaign: str, spec: str, env=None):
+    """'memory' or 'teacher:<name>' -> (answerer, display name)."""
+    if spec == "memory":
+        return memory_answerer(memory, campaign), "memory-baseline"
+    kind, _, name = spec.partition(":")
+    if kind != "teacher" or not name:
+        raise SystemExit(f"unknown answerer {spec!r}; use memory or teacher:<name>")
+    teachers, skipped = discover_teachers(dict(os.environ if env is None else env))
+    for teacher in teachers:
+        if teacher.name == name:
+            return teacher_answerer(memory, campaign, teacher), \
+                f"teacher:{teacher.name}:{teacher.model}"
+    available = ", ".join(t.name for t in teachers) or "(none configured)"
+    hints = "".join(f"\n  skipped {s.spec}: {s.reason}" for s in skipped)
+    raise SystemExit(f"no teacher named {name!r}; available: {available}{hints}")
+
+
 def cmd_score(args: argparse.Namespace) -> int:
     bank = scorecard_mod.read_bank(args.bank)
     memory = CampaignMemory(args.db)
     try:
-        answerer = memory_answerer(memory, args.campaign)
+        answerer, default_name = _pick_answerer(memory, args.campaign, args.answerer)
         entry = scorecard_mod.run_scorecard(
-            bank, answerer, answerer_name=args.answerer_name
+            bank, answerer, answerer_name=args.answerer_name or default_name
         )
     finally:
         memory.close()
@@ -107,6 +136,69 @@ def cmd_score(args: argparse.Namespace) -> int:
         with open(args.report, "w", encoding="utf-8") as f:
             f.write(scorecard_mod.render_markdown(entry, history))
         print(f"report written to {args.report}")
+    return 0
+
+
+def cmd_teachers(args: argparse.Namespace) -> int:
+    teachers, skipped = discover_teachers(dict(os.environ), spec=args.teachers)
+    if not teachers and not skipped:
+        print('no teachers configured. Set TEACHERS, e.g.\n'
+              '  TEACHERS="openai:gpt-5-mini,anthropic:claude-sonnet-5,'
+              'gemini:gemini-2.5-pro,local:llama3.1"')
+        return 1
+    for teacher in teachers:
+        print(f"ready    {teacher.name:12s} {teacher.model}")
+    for skip in skipped:
+        print(f"skipped  {skip.spec:24s} {skip.reason}")
+    return 0 if teachers else 1
+
+
+def cmd_panel(args: argparse.Namespace) -> int:
+    teachers, skipped = discover_teachers(dict(os.environ), spec=args.teachers)
+    for skip in skipped:
+        print(f"skipped teacher {skip.spec}: {skip.reason}")
+    if not teachers:
+        print("no teachers are ready; set TEACHERS (see the `teachers` command)")
+        return 1
+
+    memory = CampaignMemory(args.db)
+    try:
+        items = memory.pending_reviews(args.campaign, session_id=args.session)
+        if not items:
+            print("no pending review items — nothing to ask the panel about")
+            return 0
+        if len(items) > args.limit:
+            print(f"limiting to first {args.limit} of {len(items)} pending items"
+                  " (raise --limit to do more)")
+            items = items[: args.limit]
+
+        if args.dry_run:
+            known = panel_mod.known_names_for(memory, args.campaign, items[0])
+            print(f"DRY RUN — no API calls. {len(items)} item(s) would be sent to: "
+                  + ", ".join(f"{t.name} ({t.model})" for t in teachers))
+            print("\nFirst item's prompt:\n" + "-" * 60)
+            print(panel_mod.PANEL_SYSTEM)
+            print(panel_mod.build_panel_prompt(items[0], known))
+            return 0
+
+        results = panel_mod.run_panel(memory, args.campaign, items, teachers,
+                                      min_votes=args.min_votes)
+    finally:
+        memory.close()
+
+    banked = panel_mod.records_from_panel(results)
+    queued = panel_mod.queue_from_panel(results)
+    records_mod.write_records(args.out_records, banked)
+    panel_mod.write_queue(args.out_queue, queued)
+
+    report = panel_mod.summarize(results, teachers)
+    print(f"{report.total} item(s): {report.bank_accept} banked accept, "
+          f"{report.bank_reject} banked reject, {report.queued} queued for you")
+    print(f"banked records -> {args.out_records}")
+    print(f"morning queue  -> {args.out_queue}")
+    for name, usage in report.usage_by_teacher.items():
+        spent = ", ".join(f"{k}={v}" for k, v in sorted(usage.items()))
+        print(f"usage {name}: {spent}")
     return 0
 
 
@@ -144,10 +236,36 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", required=True)
     p.add_argument("--campaign", required=True)
     p.add_argument("--bank", required=True)
-    p.add_argument("--answerer-name", default="memory-baseline")
+    p.add_argument("--answerer", default="memory",
+                   help="memory (default) or teacher:<name> from TEACHERS")
+    p.add_argument("--answerer-name", default="",
+                   help="override the name recorded in history/report")
     p.add_argument("--history", help="JSONL file to append this run to")
     p.add_argument("--report", help="write a Markdown report here")
     p.set_defaults(func=cmd_score)
+
+    p = sub.add_parser("teachers",
+                       help="list configured teachers (no API calls)")
+    p.add_argument("--teachers", help="override the TEACHERS env spec")
+    p.set_defaults(func=cmd_teachers)
+
+    p = sub.add_parser("panel",
+                       help="ask the teacher panel about pending review items")
+    p.add_argument("--db", required=True)
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--session", help="only items from this session")
+    p.add_argument("--limit", type=int, default=panel_mod.DEFAULT_ITEM_LIMIT,
+                   help="max items per run (cost guard)")
+    p.add_argument("--min-votes", type=int, default=panel_mod.MIN_VOTES_TO_BANK,
+                   help="non-abstain votes required before anything banks")
+    p.add_argument("--teachers", help="override the TEACHERS env spec")
+    p.add_argument("--out-queue", required=True,
+                   help="JSONL morning queue (items still needing a human)")
+    p.add_argument("--out-records", required=True,
+                   help="JSONL banked training records from unanimous verdicts")
+    p.add_argument("--dry-run", action="store_true",
+                   help="show teachers + first prompt; make no API calls")
+    p.set_defaults(func=cmd_panel)
 
     args = parser.parse_args(argv)
     return args.func(args)
