@@ -106,33 +106,59 @@ def kind_for(name: str) -> EntityKind:
     return EntityKind.ITEM
 
 
-def is_registrable(name: str) -> bool:
-    """Safe to auto-register as an entity from a bare mention?
+# The SRD's generic NPC statblocks: everyday class/role words that a table
+# says constantly about PEOPLE ("our druid", "the archmage nods"). Never
+# auto-registered, no matter how rare general English says they are.
+_SRD_NPC_STATBLOCKS = frozenset({
+    "acolyte", "archmage", "assassin", "bandit", "bandit captain",
+    "berserker", "commoner", "cult fanatic", "cultist", "druid",
+    "gladiator", "guard", "knight", "mage", "noble", "priest", "scout",
+    "spy", "thug", "tribal warrior", "veteran",
+})
 
-    Registration must never fire on everyday speech, so the gate is
-    tighter than mere rarity:
 
-    - single-token names qualify only when genuinely fantasy vocabulary:
-      rare AND (very rare or not an English dictionary word). "Aboleth"
-      and "Tiamat" pass; the statblock/class words "Druid", "Mage",
-      "Bane", "Weasel", "Sprite", "Shatter" are all dictionary English
-      and stay out.
-    - multi-word names qualify unless EVERY token is common English —
-      "Horn of Blasting" passes on "blasting"-rarity grounds, while
-      "Black Bear" walking past the party stays a mention, never an
-      auto-created entity.
-    """
+def _fantasy_token(token: str) -> bool:
+    """Genuinely fantasy vocabulary: rare AND (very rare or not English)."""
     from .wordlist import is_dictionary_word
 
-    toks = _tokens(name)
-    if not toks:
-        return False
-    if len(toks) >= 2:
-        return any(zipf(t) < _COMMON_ANCHOR_ZIPF for t in toks)
-    token = toks[0]
     if zipf(token) >= _RARE_SINGLE_ZIPF:
         return False
     return zipf(token) < 2.6 or not is_dictionary_word(token)
+
+
+def is_lootable(name: str) -> bool:
+    """Eligible for the official-item LOOT pass. Looser than registration:
+    the acquisition cue next to the exact name IS the evidence, so any
+    multi-word item qualifies ("Necklace of Prayer Beads"); single-token
+    items still need fantasy vocabulary ("Oathbow" yes, "Defender" no)."""
+    toks = _tokens(name)
+    if not toks:
+        return False
+    return len(toks) >= 2 or _fantasy_token(toks[0])
+
+
+def is_registrable(name: str) -> bool:
+    """Safe to auto-register as an entity from a BARE mention?
+
+    The adversarial review proved everyday phrases fire constantly ("a
+    gust of wind snuffs the torches" is not the spell; "the traveler
+    pushes open the door" is not the deity; "our druid" is a person), so
+    the gate demands vocabulary that cannot occur in normal speech:
+
+    - SRD NPC-statblock words never qualify, however rare ("Archmage").
+    - every OTHER name — single or multi-word — needs at least one
+      genuinely fantasy token: "Aboleth", "Tiamat", "Vorpal Sword",
+      "Abi-Dalzims Horrid Wilting" pass; "Gust Of Wind", "The Traveler",
+      "Horn of Blasting", "Black Bear" do not.
+
+    Mundanely-worded ITEMS still become entities — through loot evidence
+    (an actual award in the transcript), not through bare mention; see
+    the pipeline's registration pass.
+    """
+    folded = " ".join(_tokens(name))
+    if not folded or folded in _SRD_NPC_STATBLOCKS:
+        return False
+    return any(_fantasy_token(t) for t in _tokens(name))
 
 
 @lru_cache(maxsize=1)

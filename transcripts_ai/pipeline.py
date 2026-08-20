@@ -256,6 +256,42 @@ class SessionPipeline:
             registered.append(mention.name)
         return registered
 
+    def _register_looted_officials(
+        self, campaign_id: str, session_id: str, facts: list[Fact],
+        source_path: str,
+    ) -> None:
+        """Mundanely-worded official ITEMS become entities through loot
+        evidence: the party actually obtaining a "Horn of Blasting" is what
+        makes it campaign canon-adjacent, not the phrase drifting through
+        narration."""
+        from .dnd5e import kind_for, official_names
+
+        officials = official_names()
+        for fact in facts:
+            if fact.category.value != "loot" or not fact.object_:
+                continue
+            name = fact.object_.strip()
+            if name not in officials or officials[name] != "item":
+                continue
+            if self.memory.find_entity(campaign_id, name) is not None:
+                continue
+            self.memory.upsert_entity(
+                EntityRecord(
+                    name=name,
+                    kind=kind_for(name),
+                    campaign_id=campaign_id,
+                    status=EpistemicStatus.STRONGLY_SUPPORTED,
+                    description=f"Official D&D 5e item (looted this session)",
+                    attributes={
+                        "official_5e": "item",
+                        "first_seen_session": session_id,
+                        "first_seen_line": fact.provenance.line_start,
+                        "source_path": source_path,
+                    },
+                ),
+                actor="engine:5e-reference",
+            )
+
     _SUMMARY_NPC_KINDS = frozenset({"npc", "faction", "deity", "creature"})
 
     def _known_mentions(
@@ -439,6 +475,8 @@ class SessionPipeline:
             self.memory.remember_fact(fact, actor=PIPELINE_VERSION)
 
         report.facts_verified = verified
+        self._register_looted_officials(campaign_id, session_id, facts,
+                                        str(path))
         report.review_items.extend(
             self._propose_entity_candidates(
                 campaign_id, session_id, parsed.entries, known

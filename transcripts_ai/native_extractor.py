@@ -220,12 +220,12 @@ def _official_item_facts(
     official name appears in a line that also carries an acquisition cue,
     and the quote is that line.
     """
-    from .dnd5e import is_registrable, mentions_in_entries
+    from .dnd5e import is_lootable, mentions_in_entries
 
     facts: list[Fact] = []
     by_line = {e.line_number: e for e in entries}
     for mention in mentions_in_entries(entries):
-        if mention.category not in ("item",) or not is_registrable(mention.name):
+        if mention.category not in ("item",) or not is_lootable(mention.name):
             continue
         entry = by_line[mention.line]
         if assess_entry(entry).status is EpistemicStatus.TABLE_TALK:

@@ -78,10 +78,20 @@ class TestKnowledge:
         assert kind_for("Vorpal Sword") is EntityKind.WEAPON
 
     def test_registrable(self):
-        assert is_registrable("Horn of Blasting")     # multi-word: safe
-        assert is_registrable("Aboleth")              # rare single word: safe
-        assert not is_registrable("Command")          # everyday word: never
+        # fantasy vocabulary registers on sight
+        assert is_registrable("Aboleth")
+        assert is_registrable("Tiamat")
+        assert is_registrable("Vorpal Sword")
+        # everyday words and phrases never do — even official ones
+        assert not is_registrable("Command")
         assert not is_registrable("Light")
+        assert not is_registrable("Gust Of Wind")     # "a gust of wind..."
+        assert not is_registrable("The Traveler")     # "the traveler enters"
+        assert not is_registrable("Horn of Blasting")  # items go via loot
+        # SRD NPC statblocks are people-words at a table, however rare
+        assert not is_registrable("Archmage")
+        assert not is_registrable("Acolyte")
+        assert not is_registrable("Cultist")
 
     def test_nearest_official(self):
         near = nearest_official("steph of swarming insects")
@@ -164,8 +174,25 @@ class TestEngineIntegration:
         try:
             assert not [f for f in report.facts_verified
                         if f.category.value == "loot"]
-            # ...but the term itself is still learned, kind-correct
-            assert memory.find_entity("camp", "Horn of Blasting") is not None
+            # a mundanely-worded item drifting through narration is NOT
+            # an entity — only an actual award registers it (loot path)
+            assert memory.find_entity("camp", "Horn of Blasting") is None
+        finally:
+            memory.close()
+
+    def test_looted_item_registers_but_narration_never_does(self, tmp_path):
+        memory, report = self._run(
+            tmp_path,
+            "DM: you find a horn of blasting under the altar.\n\n"
+            "DM: a gust of wind snuffs the torches as the traveler "
+            "pushes open the tavern door.\n\n"
+            "Jinx: our druid checks the horses while the archmage nods.\n")
+        try:
+            horn = memory.find_entity("camp", "Horn of Blasting")
+            assert horn is not None            # awarded -> registered
+            assert horn.attributes["official_5e"] == "item"
+            for junk in ("Gust Of Wind", "The Traveler", "Druid", "Archmage"):
+                assert memory.find_entity("camp", junk) is None, junk
         finally:
             memory.close()
 
@@ -259,7 +286,7 @@ class TestAuditHardening:
 
     def test_all_common_multiword_names_not_registrable(self):
         assert not is_registrable("Black Bear")
-        assert is_registrable("Horn of Blasting")
+        assert is_registrable("Abi-Dalzims Horrid Wilting")
 
     def test_seven_token_name_is_scannable(self):
         mentions, _ = scan_text(
