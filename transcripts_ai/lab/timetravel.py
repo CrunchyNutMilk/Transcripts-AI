@@ -34,11 +34,29 @@ from ..transcript import parse_transcript
 _DATE_IN_NAME = re.compile(r"(\d{8})")
 
 
+def _valid_dates_in(name: str) -> list[str]:
+    """8-digit runs that are plausible YYYYMMDD dates — epoch timestamps,
+    uuid fragments and counters ('1699843200', '12345678') never qualify."""
+    dates = []
+    for raw in _DATE_IN_NAME.findall(name):
+        year, month, day = int(raw[:4]), int(raw[4:6]), int(raw[6:])
+        if 1990 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+            dates.append(raw)
+    return dates
+
+
+def session_date_of(path: str | Path) -> str | None:
+    """The session's YYYYMMDD from its filename, or None. When several
+    valid dates appear, the LAST wins (prefixes come first in exports)."""
+    dates = _valid_dates_in(Path(path).name)
+    return dates[-1] if dates else None
+
+
 def session_order_key(path: str | Path) -> tuple[str, str]:
-    """Order transcripts chronologically by the YYYYMMDD in the filename."""
+    """Order transcripts chronologically by the validated date in the
+    filename; dateless files sort last, by name."""
     name = Path(path).name
-    match = _DATE_IN_NAME.search(name)
-    return (match.group(1) if match else "99999999", name)
+    return (session_date_of(path) or "99999999", name)
 
 
 @dataclass
@@ -51,15 +69,16 @@ class StepMetrics:
     known_mentions: int      # mentions of already-known entities in the text
 
     @property
-    def recognised_share(self) -> float:
+    def recognised_share(self) -> float | None:
+        """None when nothing was measured — a session with zero new-name
+        candidates must never render as a flattering 100%."""
         total = self.candidates
-        return (self.auto_linked + self.suggested) / total if total else 1.0
+        return (self.auto_linked + self.suggested) / total if total else None
 
 
 def _session_id_for(path: Path) -> str:
-    match = _DATE_IN_NAME.search(path.name)
-    if match:
-        raw = match.group(1)
+    raw = session_date_of(path)
+    if raw:
         return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
     return path.stem
 
@@ -147,6 +166,13 @@ def run_time_travel(
     game_name: str = "",
     on_progress=print,
 ) -> list[StepMetrics]:
+    db = Path(db_path)
+    if db.exists() and db.stat().st_size:
+        # Stale memory fakes the curve; a real campaign DB must never be
+        # grown by an eval. The eval owns its DB from birth, or not at all.
+        raise ValueError(
+            f"{db} already exists — the time-travel eval needs a FRESH "
+            "throwaway database (pick a new --db path)")
     paths = sorted((Path(p) for p in transcript_paths), key=session_order_key)
     memory = CampaignMemory(db_path)
     steps: list[StepMetrics] = []
@@ -188,23 +214,30 @@ def render_report(steps: list[StepMetrics], *, campaign_id: str) -> str:
         "|---|---|---|---|---|---|---|",
     ]
     for step in steps:
+        share_cell = (f"{step.recognised_share:.0%}"
+                      if step.recognised_share is not None else "n/a")
         lines.append(
             f"| {step.session_id} | {step.candidates} | {step.auto_linked} "
             f"| {step.suggested} | {step.unknown} "
-            f"| {step.recognised_share:.0%} | {step.known_mentions} |")
+            f"| {share_cell} | {step.known_mentions} |")
     if len(steps) >= 4:
         early = steps[1:max(2, len(steps) // 3)]
         late = steps[-max(2, len(steps) // 3):]
 
         def share(chunk):
+            """None when the chunk measured nothing — an empty denominator
+            must never manufacture a 100% conclusion."""
             recognised = sum(s.auto_linked + s.suggested for s in chunk)
             total = sum(s.candidates for s in chunk)
-            return recognised / total if total else 1.0
+            return recognised / total if total else None
 
+        early_share, late_share = share(early), share(late)
+        early_txt = f"{early_share:.0%}" if early_share is not None else "n/a"
+        late_txt = f"{late_share:.0%}" if late_share is not None else "n/a"
         lines += [
             "",
-            f"**Early sessions recognition:** {share(early):.0%}   "
-            f"**Late sessions recognition:** {share(late):.0%}",
+            f"**Early sessions recognition:** {early_txt}   "
+            f"**Late sessions recognition:** {late_txt}",
             "",
             "If the late number is meaningfully higher, memory is",
             "compounding: the campaign's returning names resolve on sight",

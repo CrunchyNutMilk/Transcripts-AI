@@ -310,12 +310,20 @@ def cmd_quiz(args: argparse.Namespace) -> int:
     from . import quiz as quiz_mod
     memory = CampaignMemory(args.db)
     try:
+        fact_count = len([f for f in memory.facts_for_session(
+            args.campaign, args.session) if not f.needs_review])
         items = quiz_mod.generate_quiz(memory, args.campaign, args.session,
                                        count=args.count)
     finally:
         memory.close()
     if not items:
-        print(f"no verified facts for session {args.session}; process it first")
+        if fact_count:
+            print(f"{fact_count} verified fact(s) for {args.session}, but "
+                  "none fit a quiz template yet (loot, damage, or "
+                  "subject-verb-object facts make questions)")
+        else:
+            print(f"no verified facts for session {args.session}; "
+                  "process it first")
         return 1
     if args.out_bank:
         scorecard_mod.write_bank(args.out_bank, [i.question for i in items])
@@ -335,12 +343,22 @@ def cmd_quiz(args: argparse.Namespace) -> int:
 def cmd_time_travel(args: argparse.Namespace) -> int:
     from . import timetravel
     paths: list[str] = []
+    skipped_dateless = 0
     for raw in args.transcripts:
         path = Path(raw)
         if path.is_dir():
-            paths.extend(str(p) for p in sorted(path.glob("*.md")))
+            # Vault layouts nest per-session folders: walk recursively and
+            # keep only files carrying a valid session date.
+            for candidate in sorted(path.rglob("*.md")):
+                if timetravel.session_date_of(candidate):
+                    paths.append(str(candidate))
+                else:
+                    skipped_dateless += 1
         else:
             paths.append(raw)
+    if skipped_dateless:
+        print(f"skipped {skipped_dateless} .md file(s) without a session "
+              "date in the filename")
     if len(paths) < 2:
         print("time-travel needs at least two transcripts")
         return 2

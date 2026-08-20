@@ -19,6 +19,7 @@ facts explicitly do NOT support, so a "gotcha" can always be justified.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from ..memory import CampaignMemory
@@ -27,6 +28,10 @@ from .scorecard import NOT_IN_RECORD, Question
 
 DEFAULT_COUNT = 10
 _TRICK_SHARE = 0.3       # roughly this share of the quiz is no-invention bait
+
+# The number ADJACENT to "damage", never every digit in the statement
+# ("rolled a 12 and took 24 damage" must answer 24, not 1224).
+_DAMAGE_AMOUNT = re.compile(r"(\d+)\s+(?:\w+\s+)?damage\b", re.IGNORECASE)
 
 
 def _qid(campaign_id: str, session_id: str, seed: str) -> str:
@@ -50,10 +55,16 @@ def _fact_question(fact: Fact, campaign_id: str, session_id: str) -> QuizItem | 
             question="What item did the party obtain this session?",
             expected=[fact.object_], session_id=session_id,
             notes=f"line {line}"), source_line=line)
-    if (fact.category is FactCategory.COMBAT and fact.subject
-            and fact.object_ and any(ch.isdigit() for ch in fact.statement)):
-        amount = "".join(ch for ch in fact.statement if ch.isdigit())
-        if amount and fact.subject.casefold() not in ("party", "the party"):
+    if fact.category is FactCategory.COMBAT and fact.subject:
+        # object_ is often empty on took_damage facts; the statement's
+        # damage-adjacent number is the answer. Exactly one such number,
+        # or no question — ambiguity must not reach the answer key.
+        amounts = _DAMAGE_AMOUNT.findall(fact.statement)
+        took_it = re.search(r"\b(?:took|takes?)\b", fact.statement,
+                            re.IGNORECASE)
+        if (len(set(amounts)) == 1 and took_it
+                and fact.subject.casefold() not in ("party", "the party")):
+            amount = amounts[0]
             return QuizItem(Question(
                 question_id=_qid(campaign_id, session_id,
                                  f"combat:{fact.subject}:{amount}"),
@@ -82,34 +93,44 @@ def _fact_question(fact: Fact, campaign_id: str, session_id: str) -> QuizItem | 
     return None
 
 
+def _ever_died(memory: CampaignMemory, campaign_id: str, name: str) -> bool:
+    """Campaign-wide death check: a character who died in ANY session must
+    never be 'never happened' bait — the record does say they died."""
+    return any(f.category is FactCategory.DEATH_OR_STATUS
+               for f in memory.facts_for_entity(campaign_id, name))
+
+
 def _trick_questions(memory: CampaignMemory, campaign_id: str,
                      session_id: str, facts: list[Fact],
-                     count: int) -> list[QuizItem]:
+                     count: int, *, off_limits: set[str]) -> list[QuizItem]:
     """No-invention bait with justifiable 'gotcha's.
 
-    False-death: a PC/NPC the session's facts never kill. False-loot: a
-    known item the session's facts never award. Correct answer is the
-    refusal — which is exactly the property the whole engine defends.
+    False-death: a PC/NPC the CAMPAIGN's facts never kill (checked across
+    all sessions, not just this one). False-loot: a known item this
+    session's facts never award. ``off_limits`` holds names that are
+    answers to the quiz's real questions — bait must never leak them into
+    the question body. Correct answer is always the refusal.
     """
-    dead = {f.subject.casefold() for f in facts
-            if f.category is FactCategory.DEATH_OR_STATUS}
     looted = {f.object_.casefold() for f in facts
               if f.category is FactCategory.LOOT and f.object_}
+    session_names = {e.casefold() for f in facts for e in f.entities}
+    banned = off_limits | looted | session_names
     tricks: list[QuizItem] = []
     people = [e for e in memory.entities(campaign_id)
               if e.kind in (EntityKind.PC, EntityKind.NPC)
-              and e.name.casefold() not in dead]
+              and e.name.casefold() not in banned
+              and not _ever_died(memory, campaign_id, e.name)]
     for entity in sorted(people, key=lambda e: e.name)[: max(1, count // 2)]:
         tricks.append(QuizItem(Question(
             question_id=_qid(campaign_id, session_id, f"death:{entity.name}"),
             campaign_id=campaign_id, qtype="trick",
-            question=f"When did {entity.name} die this session?",
+            question=f"When did {entity.name} die?",
             expected=[], session_id=session_id,
-            notes="no death in the record — correct answer is a refusal")))
+            notes="no death anywhere in the record — correct answer is a refusal")))
     items = [e for e in memory.entities(campaign_id)
              if e.kind in (EntityKind.ITEM, EntityKind.WEAPON,
                            EntityKind.POTION, EntityKind.ARMOUR)
-             and e.name.casefold() not in looted]
+             and e.name.casefold() not in banned]
     for entity in sorted(items, key=lambda e: e.name)[: max(1, count // 2)]:
         tricks.append(QuizItem(Question(
             question_id=_qid(campaign_id, session_id, f"loot:{entity.name}"),
@@ -126,15 +147,34 @@ def generate_quiz(memory: CampaignMemory, campaign_id: str, session_id: str,
              if not f.needs_review]
     real: list[QuizItem] = []
     seen_ids: set[str] = set()
+    by_text: dict[str, QuizItem] = {}
     for fact in sorted(facts, key=lambda f: f.provenance.line_start):
         item = _fact_question(fact, campaign_id, session_id)
-        if item and item.question.question_id not in seen_ids:
-            seen_ids.add(item.question.question_id)
-            real.append(item)
-    trick_count = max(1, int(count * _TRICK_SHARE)) if real else 0
+        if item is None or item.question.question_id in seen_ids:
+            continue
+        seen_ids.add(item.question.question_id)
+        # The same question text twice with different answers would make
+        # the quiz self-contradictory ("What item did the party obtain?"
+        # x2). Merge into one any-match question instead.
+        existing = by_text.get(item.question.question)
+        if existing is not None:
+            for answer in item.question.expected:
+                if answer.casefold() not in {
+                        e.casefold() for e in existing.question.expected}:
+                    existing.question.expected.append(answer)
+            existing.question.notes += f"; also line {item.source_line}"
+            continue
+        by_text[item.question.question] = item
+        real.append(item)
+    # At least one real question always survives when any exist; bait
+    # fills the rest of the requested share.
+    trick_count = min(max(1, int(count * _TRICK_SHARE)),
+                      max(0, count - 1)) if real else 0
     real = real[: count - trick_count]
+    off_limits = {answer.casefold() for item in real
+                  for answer in item.question.expected}
     tricks = _trick_questions(memory, campaign_id, session_id, facts,
-                              trick_count)
+                              trick_count, off_limits=off_limits)
     return real + tricks
 
 
