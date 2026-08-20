@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .detector import detect_names
 from .extraction import (
     ExtractionResult,
     FactExtractor,
@@ -25,12 +26,14 @@ from .memory import CampaignMemory
 from .native_extractor import extract_native_facts
 from .native_summarizer import build_native_summary
 from .providers import RoleRegistry
+from .resolver import BandAction, NameResolver
 from .retrieval import ContextBuilder
 from .scenes import Scene, segment_scenes
 from .schemas import Fact, ReviewItem, SessionSummary, text_sha256
 from .session_context import SessionContext
+from .spellcheck import is_ordinary_word_candidate
 from .summarizer import SessionSummarizer, render_markdown
-from .transcript import chunk_transcript, parse_transcript, validate_chunks
+from .transcript import TranscriptEntry, chunk_transcript, parse_transcript, validate_chunks
 
 PIPELINE_VERSION = "engine-pipeline-v1"
 
@@ -204,6 +207,55 @@ class SessionPipeline:
     # Self-contained path: no external AI of any kind.
     # ------------------------------------------------------------------
 
+    def _propose_entity_candidates(
+        self,
+        campaign_id: str,
+        session_id: str,
+        entries: list[TranscriptEntry],
+        known: frozenset[str],
+    ) -> list[ReviewItem]:
+        """New-name candidates from this session, queued for human review.
+
+        The engine never creates entities on its own: a detected name that
+        is not already a known entity/alias (or an ordinary English word)
+        becomes a review item carrying the resolver's suggestions, so the
+        human decides with the six review actions. AUTO_LINK-grade matches
+        are already known and are skipped — nothing to ask.
+        """
+        resolver = NameResolver(self.memory)
+        items: list[ReviewItem] = []
+        for candidate in detect_names(
+            entries, known_names=frozenset(n.casefold() for n in known)
+        ):
+            reasons = set(candidate.reasons)
+            if reasons == {"known_entity_mention"}:
+                continue                     # already in memory; nothing to ask
+            if is_ordinary_word_candidate(candidate.text, reasons):
+                continue
+            resolution = resolver.resolve(campaign_id, candidate.text)
+            best = resolution.best
+            if best is not None and best.band is BandAction.AUTO_LINK:
+                continue                     # confidently known under another name
+            item = ReviewItem(
+                campaign_id=campaign_id,
+                session_id=session_id,
+                item_type="entity",
+                subject=candidate.text,
+                reason=(f"new name candidate ({', '.join(sorted(reasons))}; "
+                        f"{candidate.mentions} mention(s), "
+                        f"first at line {candidate.entry_line})"),
+                evidence=[candidate.context],
+                suggestions=[
+                    {"canonical": s.canonical, "score": round(s.score, 3),
+                     "explanation": s.explanation}
+                    for s in resolution.suggestions
+                ],
+                confidence=min(0.9, 0.45 + 0.1 * candidate.mentions),
+            )
+            self.memory.enqueue_review(item, actor="native-pipeline")
+            items.append(item)
+        return items
+
     def process_session_native(
         self,
         *,
@@ -285,6 +337,11 @@ class SessionPipeline:
             self.memory.remember_fact(fact, actor=PIPELINE_VERSION)
 
         report.facts_verified = verified
+        report.review_items.extend(
+            self._propose_entity_candidates(
+                campaign_id, session_id, parsed.entries, known
+            )
+        )
         report.contradictions = detect_memory_contradictions(
             self.memory, campaign_id, verified, actor=PIPELINE_VERSION
         )

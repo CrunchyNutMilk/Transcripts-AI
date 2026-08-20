@@ -248,3 +248,63 @@ class TestFinding10ProbeReadsBounded:
         from ingest_campaign import FRONTMATTER_RE  # noqa: F401  (import works)
         head = open(vault / "huge_note.md", encoding="utf-8-sig").read(300)
         assert len(head) == 300
+
+
+class TestNativePipelineEntityCandidates:
+    """Real-data regression: the native pipeline must surface new-name
+    candidates for review (found processing a Craig transcript where
+    Valadar & co. never reached the queue)."""
+
+    def test_new_npc_becomes_review_item(self, tmp_path):
+        from transcripts_ai.memory import CampaignMemory
+        from transcripts_ai.pipeline import SessionPipeline
+
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "DM: You finally stand before Valadar, and the room goes cold.\n\n"
+            "Jinx: I ask Valadar what he wants with the crystal.\n\n"
+            "DM: The lich ignores the question entirely.\n",
+            encoding="utf-8",
+        )
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1",
+            )
+            entity_items = [i for i in report.review_items
+                            if i.item_type == "entity"]
+            assert any(i.subject == "Valadar" for i in entity_items)
+            queued = memory.pending_reviews("camp")
+            assert any(i.subject == "Valadar" for i in queued)
+        finally:
+            memory.close()
+
+    def test_known_entities_and_ordinary_words_stay_out(self, tmp_path):
+        from transcripts_ai.memory import CampaignMemory
+        from transcripts_ai.pipeline import SessionPipeline
+        from transcripts_ai.schemas import EntityKind, EntityRecord
+
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "DM: Valadar laughs at the party once more, Valadar always laughs.\n\n"
+            "Jinx: Perfect. That is just Perfect timing again, Perfect.\n",
+            encoding="utf-8",
+        )
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            memory.upsert_entity(
+                EntityRecord(name="Valadar", kind=EntityKind.NPC,
+                             campaign_id="camp"),
+                actor="human:1",
+            )
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1",
+            )
+            subjects = [i.subject for i in report.review_items
+                        if i.item_type == "entity"]
+            assert "Valadar" not in subjects   # already known: nothing to ask
+            assert "Perfect" not in subjects   # ordinary word, mentions be damned
+        finally:
+            memory.close()

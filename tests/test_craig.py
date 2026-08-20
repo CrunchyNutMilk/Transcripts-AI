@@ -11,6 +11,7 @@ from transcripts_ai.craig import (
     extract_craig_zip,
     merge_segments,
     parse_track_filename,
+    relabel_transcript_text,
     render_transcript,
     speaker_map_from_mapping,
 )
@@ -121,3 +122,43 @@ class TestMergeAndMapping:
 
     def test_render_empty_is_empty(self):
         assert render_transcript([]) == ""
+
+
+class TestRelabelText:
+    SPEAKER_MAP = speaker_map_from_mapping(MAPPING)
+
+    def test_bare_lines_relabelled_text_untouched(self):
+        text = ("crunchynutmilk: I got the prayer beads.\n\n"
+                "NorthTitan: Roll me 6d20.\n")
+        out, unmapped = relabel_transcript_text(text, self.SPEAKER_MAP)
+        assert out == ("Jinx: I got the prayer beads.\n\n"
+                       "DM: Roll me 6d20.\n")
+        assert unmapped == []
+
+    def test_timestamped_lines_keep_timestamps(self):
+        text = "[00:01:02.000 - 00:01:04.500] - BearDiego: hi there\n"
+        out, _ = relabel_transcript_text(text, self.SPEAKER_MAP)
+        assert out == "[00:01:02.000 - 00:01:04.500] - Diego the Bear: hi there\n"
+
+    def test_unknown_speaker_kept_and_reported(self):
+        text = "somebody_new: hello\ncrunchynutmilk: hi\n"
+        out, unmapped = relabel_transcript_text(text, self.SPEAKER_MAP)
+        assert out.startswith("somebody_new: hello\n")
+        assert unmapped == ["somebody_new"]
+
+    def test_line_numbers_survive(self):
+        text = ("NorthTitan: one\n\nnot a speaker line at all...!?\n\n"
+                "crunchynutmilk: two\n")
+        out, _ = relabel_transcript_text(text, self.SPEAKER_MAP)
+        assert len(out.splitlines()) == len(text.splitlines())
+        before = parse_transcript(text, source_path="a")
+        after = parse_transcript(out, source_path="b")
+        assert [e.line_number for e in after.entries] == \
+            [e.line_number for e in before.entries]
+
+    def test_relabelled_output_parses_with_new_speakers(self):
+        text = "vulkare is not a line\nNorthTitan: the child rolls a d100\n"
+        out, _ = relabel_transcript_text(text, self.SPEAKER_MAP)
+        parsed = parse_transcript(out, source_path="x")
+        assert parsed.entries[0].speaker == "DM"
+        assert parsed.entries[0].is_dm

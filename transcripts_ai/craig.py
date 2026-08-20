@@ -170,3 +170,39 @@ def render_transcript(segments: list[Segment]) -> str:
         for s in segments
     ]
     return "\n\n".join(lines) + ("\n" if lines else "")
+
+
+# ---------------------------------------------------------------------------
+# Relabelling Craig's text exports (Discord usernames -> character names)
+# ---------------------------------------------------------------------------
+
+def relabel_transcript_text(
+    text: str, speaker_map: dict[str, str]
+) -> tuple[str, list[str]]:
+    """Rewrite ONLY the speaker names in a transcript, mapping-authoritative.
+
+    Craig's text export is ``Username: text`` lines; the bot's format adds
+    timestamps. Both are handled with the parser's own line patterns, and
+    every other byte — text, blank lines, unparsed lines — is preserved
+    exactly, so line numbers (provenance) survive relabelling.
+
+    Returns the rewritten text and the speakers that were not in the map
+    (kept unchanged; the caller should show them so the mapping grows).
+    """
+    from .transcript import BARE_LINE_RE, LINE_RE
+
+    unmapped: dict[str, None] = {}
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        match = LINE_RE.match(line) or BARE_LINE_RE.match(line)
+        if match:
+            speaker = match.group("speaker").strip()
+            mapped = speaker_map.get(speaker.casefold())
+            if mapped is None:
+                unmapped.setdefault(speaker)
+            else:
+                start, end = match.span("speaker")
+                line = line[:start] + mapped + line[end:]
+        out_lines.append(line)
+    return "\n".join(out_lines) + ("\n" if text.endswith("\n") else ""), \
+        list(unmapped)
