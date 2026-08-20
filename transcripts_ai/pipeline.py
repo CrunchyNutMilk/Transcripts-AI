@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .detector import detect_names
+from .dnd5e import is_registrable, kind_for, mentions_in_entries, nearest_official
 from .extraction import (
     ExtractionResult,
     FactExtractor,
@@ -29,7 +30,14 @@ from .providers import RoleRegistry
 from .resolver import BandAction, NameResolver
 from .retrieval import ContextBuilder
 from .scenes import Scene, segment_scenes
-from .schemas import Fact, ReviewItem, SessionSummary, text_sha256
+from .schemas import (
+    EntityRecord,
+    EpistemicStatus,
+    Fact,
+    ReviewItem,
+    SessionSummary,
+    text_sha256,
+)
 from .session_context import SessionContext
 from .spellcheck import is_ordinary_word_candidate
 from .summarizer import SessionSummarizer, render_markdown
@@ -207,6 +215,41 @@ class SessionPipeline:
     # Self-contained path: no external AI of any kind.
     # ------------------------------------------------------------------
 
+    def _register_official_mentions(
+        self, campaign_id: str, session_id: str,
+        entries: list[TranscriptEntry], source_path: str,
+    ) -> list[str]:
+        """Official 5e names mentioned in the session become kind-correct
+        entities without human review — the reference list is a closed
+        vocabulary, so there is nothing to invent and nothing to ask.
+        Whether the party HAS the item stays a fact-level, evidence-gated
+        question; this only teaches the engine the term and its kind."""
+        registered: list[str] = []
+        seen: set[str] = set()
+        for mention in mentions_in_entries(entries):
+            folded = mention.name.casefold()
+            if folded in seen or not is_registrable(mention.name):
+                continue
+            seen.add(folded)
+            self.memory.upsert_entity(
+                EntityRecord(
+                    name=mention.name,
+                    kind=kind_for(mention.name),
+                    campaign_id=campaign_id,
+                    status=EpistemicStatus.STRONGLY_SUPPORTED,
+                    description=f"Official D&D 5e {mention.category}",
+                    attributes={
+                        "official_5e": mention.category,
+                        "first_seen_session": session_id,
+                        "first_seen_line": mention.line,
+                        "source_path": source_path,
+                    },
+                ),
+                actor="engine:5e-reference",
+            )
+            registered.append(mention.name)
+        return registered
+
     def _propose_entity_candidates(
         self,
         campaign_id: str,
@@ -236,6 +279,21 @@ class SessionPipeline:
             best = resolution.best
             if best is not None and best.band is BandAction.AUTO_LINK:
                 continue                     # confidently known under another name
+            suggestions = [
+                {"canonical": s.canonical, "score": round(s.score, 3),
+                 "explanation": s.explanation}
+                for s in resolution.suggestions
+            ]
+            official = nearest_official(candidate.text)
+            if official is not None and not any(
+                s["canonical"].casefold() == official.official.casefold()
+                for s in suggestions
+            ):
+                suggestions.append({
+                    "canonical": official.official,
+                    "score": official.score,
+                    "explanation": f"official 5e {official.category}",
+                })
             item = ReviewItem(
                 campaign_id=campaign_id,
                 session_id=session_id,
@@ -245,11 +303,7 @@ class SessionPipeline:
                         f"{candidate.mentions} mention(s), "
                         f"first at line {candidate.entry_line})"),
                 evidence=[candidate.context],
-                suggestions=[
-                    {"canonical": s.canonical, "score": round(s.score, 3),
-                     "explanation": s.explanation}
-                    for s in resolution.suggestions
-                ],
+                suggestions=suggestions,
                 confidence=min(0.9, 0.45 + 0.1 * candidate.mentions),
             )
             self.memory.enqueue_review(item, actor="native-pipeline")
@@ -304,7 +358,10 @@ class SessionPipeline:
             )
             return report
 
+        self._register_official_mentions(campaign_id, session_id,
+                                         parsed.entries, str(path))
         # Exact stored casing — the normaliser must never reconstruct names.
+        # (Freshly registered official names join it, so recasing works.)
         known = frozenset(e.name for e in self.memory.entities(campaign_id))
         facts = extract_native_facts(
             parsed.entries,

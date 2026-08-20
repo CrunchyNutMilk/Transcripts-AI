@@ -25,7 +25,8 @@ from functools import lru_cache
 from importlib import resources
 
 from .phonetics import phonetic_key
-from .transcript import parse_transcript
+from .schemas import EntityKind
+from .transcript import TranscriptEntry, parse_transcript
 from .wordlist import zipf
 
 _WORD = re.compile(r"[a-z0-9]+(?:['\-][a-z0-9]+)*")
@@ -69,6 +70,58 @@ def _index() -> tuple[dict[tuple[str, ...], str], dict[str, list[str]]]:
     return exact, anchors
 
 
+_WEAPON_WORDS = frozenset(
+    "sword dagger mace axe bow blade javelin trident hammer flail spear "
+    "scimitar oathbow defender arrow".split())
+_ARMOUR_WORDS = frozenset("armor armour mail plate shield chain".split())
+_RARE_SINGLE_ZIPF = 3.3   # single-token names rarer than this are registrable
+
+
+def kind_for(name: str) -> EntityKind:
+    """The engine EntityKind an official name maps to."""
+    category = official_names().get(name, "")
+    if category == "spell":
+        return EntityKind.SPELL
+    if category == "monster":
+        return EntityKind.CREATURE
+    if category == "deity":
+        return EntityKind.DEITY
+    toks = set(_tokens(name))
+    if "potion" in toks or "oil" in toks or "philter" in toks:
+        return EntityKind.POTION
+    if toks & _ARMOUR_WORDS:
+        return EntityKind.ARMOUR
+    if toks & _WEAPON_WORDS:
+        return EntityKind.WEAPON
+    return EntityKind.ITEM
+
+
+def is_registrable(name: str) -> bool:
+    """Safe to auto-register as an entity from a bare mention?
+
+    Multi-word official names ("Horn of Blasting") cannot be accidental.
+    A single-token name only qualifies when the word is rare English
+    ("Aboleth" yes; the spells "Command", "Light", "Fly" would register
+    on everyday speech and are left to evidence-based extraction).
+    """
+    toks = _tokens(name)
+    if len(toks) >= 2:
+        return True
+    return bool(toks) and zipf(toks[0]) < _RARE_SINGLE_ZIPF
+
+
+@lru_cache(maxsize=1)
+def protected_tokens() -> set[str]:
+    """Rare tokens of official names — the spellchecker must never
+    'correct' thunderous, aboleth, or tiamat into everyday words."""
+    protected: set[str] = set()
+    for name in official_names():
+        for token in _tokens(name):
+            if len(token) >= 4 and zipf(token) < 3.9:
+                protected.add(token)
+    return protected
+
+
 @dataclass
 class NearMiss:
     heard: str            # the transcript window, as written
@@ -76,6 +129,14 @@ class NearMiss:
     category: str
     line: int
     score: float
+
+
+@dataclass
+class OfficialMention:
+    name: str             # official casing
+    category: str
+    line: int
+    quote: str
 
 
 def _window_score(window: tuple[str, ...], target: tuple[str, ...]) -> float:
@@ -94,6 +155,61 @@ def _window_score(window: tuple[str, ...], target: tuple[str, ...]) -> float:
     return total / len(target)
 
 
+def _exact_in_tokens(toks: list[str]) -> tuple[list[str], set[int]]:
+    """Official names exactly present in a token list, longest-match-first.
+    Returns (names in order found, token positions they occupy)."""
+    exact, _ = _index()
+    found: list[str] = []
+    occupied: set[int] = set()
+    for size in range(min(6, len(toks)), 0, -1):
+        for start in range(len(toks) - size + 1):
+            if any(p in occupied for p in range(start, start + size)):
+                continue
+            name = exact.get(tuple(toks[start:start + size]))
+            if name:
+                found.append(name)
+                occupied.update(range(start, start + size))
+    return found, occupied
+
+
+def mentions_in_entries(entries: list[TranscriptEntry]) -> list[OfficialMention]:
+    """Exact official-name mentions with line provenance."""
+    mentions = []
+    for entry in entries:
+        for name in _exact_in_tokens(_tokens(entry.text))[0]:
+            mentions.append(OfficialMention(
+                name=name, category=official_names()[name],
+                line=entry.line_number, quote=entry.text[:240]))
+    return mentions
+
+
+def nearest_official(text: str) -> NearMiss | None:
+    """Best official near-match for a short candidate string, if any."""
+    toks = tuple(_tokens(text))
+    if not toks:
+        return None
+    _, anchors = _index()
+    exact, _ = _index()
+    if toks in exact:
+        name = exact[toks]
+        return NearMiss(heard=text, official=name,
+                        category=official_names()[name], line=0, score=1.0)
+    best: NearMiss | None = None
+    candidates = {name for token in toks for name in anchors.get(token, [])}
+    if len(toks) == 1:
+        key = phonetic_key(toks[0])
+        candidates |= {name for name in official_names()
+                       if len(_tokens(name)) == 1
+                       and phonetic_key(_tokens(name)[0]) == key}
+    for name in candidates:
+        score = _window_score(toks, tuple(_tokens(name)))
+        if score >= _WINDOW_RATIO and (best is None or score > best.score):
+            best = NearMiss(heard=text, official=name,
+                            category=official_names()[name],
+                            line=0, score=round(score, 3))
+    return best
+
+
 def scan_text(text: str) -> tuple[Counter, list[NearMiss]]:
     """(exact mention counts by official name, near-miss suspects).
 
@@ -108,17 +224,9 @@ def scan_text(text: str) -> tuple[Counter, list[NearMiss]]:
 
     for entry in parsed.entries:
         toks = _tokens(entry.text)
-        occupied: set[int] = set()     # token positions inside exact matches
-        # Exact pass, longest names first so subsets don't double-count.
-        for size in range(min(6, len(toks)), 0, -1):
-            for start in range(len(toks) - size + 1):
-                if any(p in occupied for p in range(start, start + size)):
-                    continue
-                window = tuple(toks[start:start + size])
-                name = exact.get(window)
-                if name:
-                    mentions[name] += 1
-                    occupied.update(range(start, start + size))
+        found, occupied = _exact_in_tokens(toks)
+        for name in found:
+            mentions[name] += 1
         # Near-miss pass, anchored on rare tokens outside exact matches.
         for position, token in enumerate(toks):
             if position in occupied or token not in anchors:

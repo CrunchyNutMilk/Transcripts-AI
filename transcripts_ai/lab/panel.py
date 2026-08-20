@@ -134,11 +134,23 @@ def known_names_for(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
 
 
 def build_panel_prompt(item: ReviewItem, known_names: list[str]) -> str:
+    from ..dnd5e import nearest_official
+
     template = _QUESTION_BY_TYPE.get(item.item_type, _QUESTION_BY_TYPE["entity"])
     lines = [
         f"ITEM TYPE: {item.item_type}",
         f"QUESTION: {template.format(subject=item.subject)}",
         f"ENGINE'S CONCERN: {item.reason}",
+    ]
+    official = nearest_official(item.subject)
+    if official is not None:
+        exact = official.score >= 0.999
+        lines.append(
+            f"OFFICIAL 5e REFERENCE: the subject "
+            + ("exactly matches" if exact else
+               f"resembles ({official.score:.0%})")
+            + f' the official {official.category} "{official.official}".')
+    lines += [
         "",
         "KNOWN NAMES (the only allowed values for choice):",
     ]

@@ -162,6 +162,111 @@ def _known_name_normaliser(known_entities: frozenset[str]):
     return normalise
 
 
+# Acquisition cues for the official-item loot pass. Case-insensitive and
+# casing-independent on the item side: the classic loot rules need a
+# capitalised item name, which lowercase per-speaker transcripts (Craig)
+# never provide — official 5e names close that gap because the reference
+# list is exact regardless of how Whisper cased the words.
+_ACQUIRE_CUE = re.compile(
+    r"(?i)(?:\b(?:you|i|we|he|she|they)(?:'ll|'ve|'d| will| would)?\s+"
+    r"(?:\w+\s+){0,2}?"
+    r"(?:find|found|finds|receive|received|get|gets|got|take|takes|took|"
+    r"grab|grabs|claim|claims|keep|keeps|attune|attunes|hold|holds)\b"
+    r"|\bhands? (?:you|over|it|him|her|them)\b"
+    r"|\bgives? (?:you|him|her|them|it)\b"
+    r"|\bgoes to\b|\bcommunity chest\b|\byour reward\b"
+    r"|\bthe treasure\b|\bpicks? up\b|\bi'?ll take\b)",
+)
+
+# The cue must sit NEXT TO the item, not merely share a long line with it:
+# "if you use a horn of blasting … and then you get 41" is banter about an
+# item, not an acquisition of one.
+_CUE_BEFORE_CHARS = 60
+_CUE_AFTER_CHARS = 30
+
+
+def _cue_near_item(text: str, item_name: str) -> bool:
+    lowered = text.casefold()
+    tokens = [re.escape(t) for t in re.findall(r"[a-z0-9]+(?:['\-][a-z0-9]+)*",
+                                               item_name.casefold())]
+    if not tokens:
+        return False
+    item = re.search(r"\b" + r"\W+".join(tokens) + r"\b", lowered)
+    if item is None:
+        return False
+    for cue in _ACQUIRE_CUE.finditer(lowered):
+        if cue.end() <= item.start() and item.start() - cue.end() <= _CUE_BEFORE_CHARS:
+            return True
+        if cue.start() >= item.end() and cue.start() - item.end() <= _CUE_AFTER_CHARS:
+            return True
+    return False
+
+
+def _official_item_facts(
+    entries: list[TranscriptEntry],
+    seen: set[tuple[str, int]],
+    *,
+    campaign_id: str,
+    session_id: str,
+    source_path: str,
+    source_hash: str,
+) -> list[Fact]:
+    """Loot facts from official 5e item names, any casing.
+
+    Evidence-correct by construction: the fact only exists when the exact
+    official name appears in a line that also carries an acquisition cue,
+    and the quote is that line.
+    """
+    from .dnd5e import is_registrable, mentions_in_entries
+
+    facts: list[Fact] = []
+    by_line = {e.line_number: e for e in entries}
+    for mention in mentions_in_entries(entries):
+        if mention.category not in ("item",) or not is_registrable(mention.name):
+            continue
+        entry = by_line[mention.line]
+        if assess_entry(entry).status is EpistemicStatus.TABLE_TALK:
+            continue
+        if not _cue_near_item(entry.text, mention.name):
+            continue
+        time_status = assess_time_status(entry.text)
+        if time_status in (TimeStatus.NEGATED, TimeStatus.HYPOTHETICAL):
+            continue
+        key = (f"official-item:{mention.name.casefold()}", entry.line_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        speaker_mode = assess_speaker_mode(entry)
+        confidence = 0.8 if speaker_mode in WORLD_FACT_MODES else 0.7
+        facts.append(Fact(
+            statement=f"The party obtained {mention.name}",
+            category=FactCategory.LOOT,
+            change_type=ChangeType.AWARDED,
+            entities=[mention.name],
+            status=EpistemicStatus.STRONGLY_SUPPORTED,
+            confidence=confidence,
+            subject="party",
+            relationship="obtained",
+            object_=mention.name,
+            time_status=TimeStatus.HAPPENED if time_status is TimeStatus.UNKNOWN
+            else time_status,
+            speaker_mode=speaker_mode,
+            provenance=Provenance(
+                campaign_id=campaign_id,
+                session_id=session_id,
+                source_path=source_path,
+                source_hash=source_hash,
+                line_start=entry.line_number,
+                line_end=entry.line_number,
+                speaker=entry.speaker,
+                quote=entry.text[:300],
+                extractor=NATIVE_EXTRACTOR_VERSION,
+                extractor_version="1",
+            ),
+        ))
+    return facts
+
+
 def extract_native_facts(
     entries: list[TranscriptEntry],
     *,
@@ -260,6 +365,12 @@ def extract_native_facts(
                     ),
                 )
             )
+
+    facts.extend(_official_item_facts(
+        entries, seen,
+        campaign_id=campaign_id, session_id=session_id,
+        source_path=source_path, source_hash=source_hash,
+    ))
 
     # Initiative order is a session-level combat fact when actually spoken;
     # its evidence is the exact lines the values were spoken on.

@@ -102,7 +102,14 @@ class SpellChecker:
 
     def _protected_tokens(self, campaign_id: str) -> tuple[set[str], set[str]]:
         """Tokens (and phonetic keys) that belong to the entity lane."""
-        words: set[str] = set()
+        from .dnd5e import protected_tokens as official_5e_tokens
+
+        # Rare tokens of official 5e names (thunderous, aboleth, tiamat)
+        # are rulebook vocabulary, never typos to "fix". Word-level only:
+        # phonetic keys over ~650 rulebook words are so coarse they would
+        # shield everyday misspellings ("becuase" shares a key with
+        # "pegasus"); phonetic protection stays for campaign entities.
+        words: set[str] = set(official_5e_tokens())
         keys: set[str] = set()
         for entity in self.memory.entities(campaign_id):
             for token in entity.name.casefold().split():
