@@ -249,6 +249,25 @@ def cmd_overnight(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_names_check(args: argparse.Namespace) -> int:
+    from ..dnd5e import scan_text
+
+    text = Path(args.file).read_text(encoding="utf-8")
+    mentions, suspects = scan_text(text)
+    print(f"{sum(mentions.values())} official-name mention(s), "
+          f"{len(mentions)} distinct")
+    for name, count in mentions.most_common(args.top):
+        print(f"  {name:36s} x{count}")
+    if suspects:
+        print(f"\n{len(suspects)} suspected mangling(s):")
+        for s in suspects[: args.top]:
+            print(f'  line {s.line:5d}: "{s.heard}" -> {s.official} '
+                  f"[{s.category}] ({s.score:.0%})")
+    else:
+        print("\nno suspected manglings")
+    return 0
+
+
 def cmd_whisper_prompt(args: argparse.Namespace) -> int:
     memory = CampaignMemory(args.db)
     try:
@@ -398,6 +417,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--teachers", help="override the TEACHERS env spec")
     p.add_argument("--bank", help="question bank for the nightly scorecard")
     p.set_defaults(func=cmd_overnight)
+
+    p = sub.add_parser("names-check",
+                       help="find official 5e names (and manglings) in a transcript")
+    p.add_argument("--file", required=True)
+    p.add_argument("--top", type=int, default=40)
+    p.set_defaults(func=cmd_names_check)
 
     p = sub.add_parser("whisper-prompt",
                        help="build a Whisper initial_prompt from campaign names")

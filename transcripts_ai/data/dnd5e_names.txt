@@ -1,0 +1,1134 @@
+# Official D&D 5e reference names for the engine.
+# Spells and monsters: extracted from the 5.1 SRD (CC-BY-4.0, Wizards of the Coast).
+# Magic items and deities: standard 5e names (facts, not rules text).
+# Format: <category>\t<name>   (regenerate rather than hand-edit)
+spell	Abi-Dalzims Horrid Wilting
+spell	Absorb Elements
+spell	Acid Arrow
+spell	Acid Splash
+spell	Aganazzars Scorcher
+spell	Aid
+spell	Alarm
+spell	Alter Self
+spell	Animal Friendship
+spell	Animal Messenger
+spell	Animal Shapes
+spell	Animate Dead
+spell	Animate Objects
+spell	Antilife Shell
+spell	Antimagic Field
+spell	Antipathysympathy
+spell	Arcane Eye
+spell	Arcane Gate
+spell	Arcane Lock
+spell	Armor Of Agathys
+spell	Arms Of Hadar
+spell	Astral Projection
+spell	Augury
+spell	Aura Of Life
+spell	Aura Of Purity
+spell	Aura Of Vitality
+spell	Awaken
+spell	Bane
+spell	Banishing Smite
+spell	Banishment
+spell	Barkskin
+spell	Beacon Of Hope
+spell	Beast Bond
+spell	Beast Sense
+spell	Bestow Curse
+spell	Bigbys Hand
+spell	Blade Barrier
+spell	Blade Ward
+spell	Bless
+spell	Blight
+spell	Blinding Smite
+spell	Blindness/Deafness
+spell	Blink
+spell	Blur
+spell	Bones Of The Earth
+spell	Booming Blade
+spell	Branding Smite
+spell	Burning Hands
+spell	Call Lightning
+spell	Calm Emotions
+spell	Catapult
+spell	Catnap
+spell	Cause Fear
+spell	Ceremony
+spell	Chain Lightning
+spell	Chaos Bolt
+spell	Charm Monster
+spell	Charm Person
+spell	Chill Touch
+spell	Chromatic Orb
+spell	Circle Of Death
+spell	Circle Of Power
+spell	Clairvoyance
+spell	Clone
+spell	Cloud Of Daggers
+spell	Cloudkill
+spell	Color Spray
+spell	Command
+spell	Commune
+spell	Commune With Nature
+spell	Compelled Duel
+spell	Comprehend Languages
+spell	Compulsion
+spell	Cone Of Cold
+spell	Confusion
+spell	Conjure Animals
+spell	Conjure Barrage
+spell	Conjure Celestial
+spell	Conjure Elemental
+spell	Conjure Fey
+spell	Conjure Minor Elementals
+spell	Conjure Volley
+spell	Conjure Woodland Beings
+spell	Contact Other Plane
+spell	Contagion
+spell	Contingency
+spell	Continual Flame
+spell	Control Flames
+spell	Control Water
+spell	Control Weather
+spell	Control Winds
+spell	Cordon Of Arrows
+spell	Counterspell
+spell	Create Bonfire
+spell	Create Food And Water
+spell	Create Homunculus
+spell	Create Or Destroy Water
+spell	Create Undead
+spell	Creation
+spell	Crown Of Madness
+spell	Crown Of Stars
+spell	Crusaders Mantle
+spell	Cure Wounds
+spell	Dancing Lights
+spell	Danse Macabre
+spell	Darkness
+spell	Darkvision
+spell	Dawn
+spell	Daylight
+spell	Death Ward
+spell	Delayed Blast Fireball
+spell	Demiplane
+spell	Destructive Wave
+spell	Detect Evil And Good
+spell	Detect Magic
+spell	Detect Poison And Disease
+spell	Detect Thoughts
+spell	Dimension Door
+spell	Disguise Self
+spell	Disintegrate
+spell	Dispel Evil And Good
+spell	Dispel Magic
+spell	Dissonant Whispers
+spell	Divination
+spell	Divine Favor
+spell	Divine Word
+spell	Dominate Beast
+spell	Dominate Monster
+spell	Dominate Person
+spell	Dragons Breath
+spell	Drawmijs Instant Summons
+spell	Dream
+spell	Druid Grove
+spell	Druidcraft
+spell	Dust Devil
+spell	Earth Tremor
+spell	Earthbind
+spell	Earthquake
+spell	Eldritch Blast
+spell	Elemental Bane
+spell	Elemental Weapon
+spell	Enemies Abound
+spell	Enervation
+spell	Enhance Ability
+spell	Enlarge/Reduce
+spell	Ensnaring Strike
+spell	Entangle
+spell	Enthrall
+spell	Erupting Earth
+spell	Etherealness
+spell	Evards Black Tentacles
+spell	Expeditious Retreat
+spell	Eyebite
+spell	Fabricate
+spell	Faerie Fire
+spell	False Life
+spell	Far Step
+spell	Fear
+spell	Feather Fall
+spell	Feeblemind
+spell	Feign Death
+spell	Find Familiar
+spell	Find Greater Steed
+spell	Find Steed
+spell	Find The Path
+spell	Find Traps
+spell	Finger Of Death
+spell	Fire Bolt
+spell	Fire Shield
+spell	Fire Storm
+spell	Fireball
+spell	Flame Arrows
+spell	Flame Blade
+spell	Flame Strike
+spell	Flaming Sphere
+spell	Flesh To Stone
+spell	Fly
+spell	Fog Cloud
+spell	Forbiddance
+spell	Forcecage
+spell	Foresight
+spell	Freedom Of Movement
+spell	Friends
+spell	Frostbite
+spell	Gaseous Form
+spell	Gate
+spell	Geas
+spell	Gentle Repose
+spell	Giant Insect
+spell	Glibness
+spell	Globe Of Invulnerability
+spell	Glyph Of Warding
+spell	Goodberry
+spell	Grasping Vine
+spell	Grease
+spell	Greater Invisibility
+spell	Greater Restoration
+spell	Green-Flame Blade
+spell	Guardian Of Faith
+spell	Guardian Of Nature
+spell	Guards And Wards
+spell	Guidance
+spell	Guiding Bolt
+spell	Guiding Hand
+spell	Gust
+spell	Gust Of Wind
+spell	Hail Of Thorns
+spell	Hallow
+spell	Hallucinatory Terrain
+spell	Harm
+spell	Haste
+spell	Heal
+spell	Healing Spirit
+spell	Healing Word
+spell	Heat Metal
+spell	Hellish Rebuke
+spell	Heroes Feast
+spell	Heroism
+spell	Hex
+spell	Hold Monster
+spell	Hold Person
+spell	Holy Aura
+spell	Holy Weapon
+spell	Hunger Of Hadar
+spell	Hunters Mark
+spell	Hypnotic Pattern
+spell	Ice Knife
+spell	Ice Storm
+spell	Id Insinuation
+spell	Identify
+spell	Illusory Dragon
+spell	Illusory Script
+spell	Immolation
+spell	Imprisonment
+spell	Incendiary Cloud
+spell	Infernal Calling
+spell	Infestation
+spell	Inflict Wounds
+spell	Insect Plague
+spell	Investiture Of Flame
+spell	Investiture Of Ice
+spell	Investiture Of Stone
+spell	Investiture Of Wind
+spell	Invisibility
+spell	Invulnerability
+spell	Jump
+spell	Knock
+spell	Legend Lore
+spell	Leomunds Secret Chest
+spell	Leomunds Tiny Hut
+spell	Lesser Restoration
+spell	Levitate
+spell	Life Transference
+spell	Light
+spell	Lightning Arrow
+spell	Lightning Bolt
+spell	Lightning Lure
+spell	Locate Animals Or Plants
+spell	Locate Creature
+spell	Locate Object
+spell	Longstrider
+spell	Maddening Darkness
+spell	Maelstrom
+spell	Mage Armor
+spell	Mage Hand
+spell	Magic Circle
+spell	Magic Jar
+spell	Magic Missile
+spell	Magic Mouth
+spell	Magic Stone
+spell	Magic Weapon
+spell	Major Image
+spell	Mass Cure Wounds
+spell	Mass Heal
+spell	Mass Healing Word
+spell	Mass Polymorph
+spell	Mass Suggestion
+spell	Maximilians Earthen Grasp
+spell	Maze
+spell	Meld Into Stone
+spell	Melfs Acid Arrow
+spell	Melfs Minute Meteors
+spell	Mending
+spell	Mental Prison
+spell	Message
+spell	Meteor Swarm
+spell	Mighty Fortress
+spell	Mind Blank
+spell	Mind Sliver
+spell	Mind Spike
+spell	Minor Illusion
+spell	Mirage Arcane
+spell	Mirror Image
+spell	Mislead
+spell	Misty Step
+spell	Modify Memory
+spell	Mold Earth
+spell	Moonbeam
+spell	Mordenkainens Faithful Hound
+spell	Mordenkainens Magnificent Mansion
+spell	Mordenkainens Private Sanctum
+spell	Mordenkainens Sword
+spell	Move Earth
+spell	Negative Energy Flood
+spell	Nondetection
+spell	Nystuls Magic Aura
+spell	Otilukes Freezing Sphere
+spell	Otilukes Resilient Sphere
+spell	Ottos Irresistible Dance
+spell	Pass Without Trace
+spell	Passwall
+spell	Phantasmal Force
+spell	Phantasmal Killer
+spell	Phantom Steed
+spell	Planar Ally
+spell	Planar Binding
+spell	Plane Shift
+spell	Plant Growth
+spell	Poison Spray
+spell	Polymorph
+spell	Power Word Heal
+spell	Power Word Kill
+spell	Power Word Pain
+spell	Power Word Stun
+spell	Prayer Of Healing
+spell	Prestidigitation
+spell	Primal Savagery
+spell	Primordial Ward
+spell	Prismatic Spray
+spell	Prismatic Wall
+spell	Produce Flame
+spell	Programmed Illusion
+spell	Project Image
+spell	Protection From Energy
+spell	Protection From Evil And Good
+spell	Protection From Poison
+spell	Psychic Scream
+spell	Purify Food And Drink
+spell	Pyrotechnics
+spell	Raise Dead
+spell	Rarys Telepathic Bond
+spell	Ray Of Enfeeblement
+spell	Ray Of Frost
+spell	Ray Of Sickness
+spell	Regenerate
+spell	Reincarnate
+spell	Remove Curse
+spell	Resistance
+spell	Resurrection
+spell	Reverse Gravity
+spell	Revivify
+spell	Rope Trick
+spell	Sacred Flame
+spell	Sanctuary
+spell	Scatter
+spell	Scorching Ray
+spell	Scrying
+spell	Searing Smite
+spell	See Invisibility
+spell	Seeming
+spell	Sending
+spell	Sequester
+spell	Shadow Blade
+spell	Shadow Of Moil
+spell	Shape Water
+spell	Shapechange
+spell	Shatter
+spell	Shield
+spell	Shield Of Faith
+spell	Shillelagh
+spell	Shocking Grasp
+spell	Sickening Radiance
+spell	Silence
+spell	Silent Image
+spell	Simulacrum
+spell	Skill Empowerment
+spell	Skywrite
+spell	Sleep
+spell	Sleet Storm
+spell	Slow
+spell	Snare
+spell	Snillocs Snowball Swarm
+spell	Soul Cage
+spell	Spare The Dying
+spell	Speak With Animals
+spell	Speak With Dead
+spell	Speak With Plants
+spell	Spider Climb
+spell	Spike Growth
+spell	Spirit Guardians
+spell	Spiritual Weapon
+spell	Staggering Smite
+spell	Steel Wind Strike
+spell	Stinking Cloud
+spell	Stone Shape
+spell	Stoneskin
+spell	Storm Of Vengeance
+spell	Storm Sphere
+spell	Suggestion
+spell	Summon Greater Demon
+spell	Summon Lesser Demons
+spell	Sunbeam
+spell	Sunburst
+spell	Swift Quiver
+spell	Sword Burst
+spell	Symbol
+spell	Synaptic Static
+spell	Tashas Hideous Laughter
+spell	Telekinesis
+spell	Telepathy
+spell	Teleport
+spell	Teleportation Circle
+spell	Temple Of The Gods
+spell	Tensers Floating Disk
+spell	Tensers Transformation
+spell	Thaumaturgy
+spell	Thorn Whip
+spell	Thunder Step
+spell	Thunderclap
+spell	Thunderous Smite
+spell	Thunderwave
+spell	Tidal Wave
+spell	Time Stop
+spell	Tiny Servant
+spell	Toll The Dead
+spell	Tongues
+spell	Transmute Rock
+spell	Transport Via Plants
+spell	Tree Stride
+spell	True Polymorph
+spell	True Resurrection
+spell	True Seeing
+spell	True Strike
+spell	Tsunami
+spell	Unknown spell
+spell	Unseen Servant
+spell	Vampiric Touch
+spell	Vicious Mockery
+spell	Vitriolic Sphere
+spell	Wall Of Fire
+spell	Wall Of Force
+spell	Wall Of Ice
+spell	Wall Of Light
+spell	Wall Of Sand
+spell	Wall Of Stone
+spell	Wall Of Thorns
+spell	Wall Of Water
+spell	Warding Bond
+spell	Warding Wind
+spell	Water Breathing
+spell	Water Walk
+spell	Watery Sphere
+spell	Web
+spell	Weird
+spell	Whirlwind
+spell	Wild Cunning
+spell	Wind Walk
+spell	Wind Wall
+spell	Wish
+spell	Witch Bolt
+spell	Word Of Radiance
+spell	Word Of Recall
+spell	Wrath Of Nature
+spell	Wrathful Smite
+spell	Wristpocket
+spell	Zephyr Strike
+spell	Zone Of Truth
+monster	Aboleth
+monster	Acolyte
+monster	Adult Black Dragon
+monster	Adult Blue Dragon
+monster	Adult Brass Dragon
+monster	Adult Bronze Dragon
+monster	Adult Copper Dragon
+monster	Adult Gold Dragon
+monster	Adult Green Dragon
+monster	Adult Red Dragon
+monster	Adult Silver Dragon
+monster	Adult White Dragon
+monster	Air Elemental
+monster	Ancient Black Dragon
+monster	Ancient Blue Dragon
+monster	Ancient Brass Dragon
+monster	Ancient Bronze Dragon
+monster	Ancient Copper Dragon
+monster	Ancient Gold Dragon
+monster	Ancient Green Dragon
+monster	Ancient Red Dragon
+monster	Ancient Silver Dragon
+monster	Ancient White Dragon
+monster	Androsphinx
+monster	Animated Armor
+monster	Ankheg
+monster	Ankylosaurus
+monster	Ape
+monster	Archmage
+monster	Assassin
+monster	Awakened Shrub
+monster	Awakened Tree
+monster	Axe Beak
+monster	Azer
+monster	Baboon
+monster	Badger
+monster	Balor
+monster	Bandit
+monster	Bandit Captain
+monster	Barbed Devil
+monster	Basilisk
+monster	Bat
+monster	Bearded Devil
+monster	Behir
+monster	Berserker
+monster	Black Bear
+monster	Black Dragon Wyrmling
+monster	Black Pudding
+monster	Blink Dog
+monster	Blood Hawk
+monster	Blue Dragon Wyrmling
+monster	Boar
+monster	Bone Devil
+monster	Brass Dragon Wyrmling
+monster	Bronze Dragon Wyrmling
+monster	Brown Bear
+monster	Bugbear
+monster	Bulette
+monster	Burrowshark
+monster	Camel
+monster	Cat
+monster	Centaur
+monster	Chain Devil
+monster	Chimera
+monster	Chuul
+monster	Clay Golem
+monster	Cloaker
+monster	Cloud Giant
+monster	Cockatrice
+monster	Commoner
+monster	Constrictor Snake
+monster	Copper Dragon Wyrmling
+monster	Couatl
+monster	Crab
+monster	Crocodile
+monster	Cult Fanatic
+monster	Cultist
+monster	Dao
+monster	Darkmantle
+monster	Death Dog
+monster	Deep Gnome (Svirfneblin)
+monster	Deer
+monster	Deva
+monster	Dire Wolf
+monster	Djinni
+monster	Doppelganger
+monster	Draft Horse
+monster	Dragon Turtle
+monster	Dretch
+monster	Drider
+monster	Drow
+monster	Druid
+monster	Dryad
+monster	Duergar
+monster	Dust Mephit
+monster	Eagle
+monster	Earth Elemental
+monster	Earth Elemental Myrmidon
+monster	Efreeti
+monster	Elephant
+monster	Elk
+monster	Erinyes
+monster	Ettercap
+monster	Ettin
+monster	Fire Elemental
+monster	Fire Giant
+monster	Fire Snake
+monster	Flesh Golem
+monster	Flying Snake
+monster	Flying Sword
+monster	Frog
+monster	Frost Giant
+monster	Gargoyle
+monster	Gelatinous Cube
+monster	Generic Monster
+monster	Generic creature
+monster	Ghast
+monster	Ghost
+monster	Ghoul
+monster	Giant Ape
+monster	Giant Badger
+monster	Giant Bat
+monster	Giant Boar
+monster	Giant Centipede
+monster	Giant Constrictor Snake
+monster	Giant Crab
+monster	Giant Crocodile
+monster	Giant Eagle
+monster	Giant Elk
+monster	Giant Fire Beetle
+monster	Giant Frog
+monster	Giant Goat
+monster	Giant Hyena
+monster	Giant Lizard
+monster	Giant Octopus
+monster	Giant Owl
+monster	Giant Poisonous Snake
+monster	Giant Rat
+monster	Giant Rat (Diseased)
+monster	Giant Scorpion
+monster	Giant Sea Horse
+monster	Giant Shark
+monster	Giant Spider
+monster	Giant Toad
+monster	Giant Vulture
+monster	Giant Wasp
+monster	Giant Weasel
+monster	Giant Wolf Spider
+monster	Gibbering Mouther
+monster	Glabrezu
+monster	Gladiator
+monster	Gnoll
+monster	Goat
+monster	Goblin
+monster	Gold Dragon Wyrmling
+monster	Gorgon
+monster	Gray Ooze
+monster	Green Dragon Wyrmling
+monster	Green Hag
+monster	Grick
+monster	Griffon
+monster	Grimlock
+monster	Guard
+monster	Guardian Naga
+monster	Gynosphinx
+monster	Half-Red Dragon Veteran
+monster	Harpy
+monster	Hawk
+monster	Hell Hound
+monster	Hezrou
+monster	Hill Giant
+monster	Hippogriff
+monster	Hobgoblin
+monster	Hobgoblin Captain
+monster	Homunculus
+monster	Horned Devil
+monster	Hunter Shark
+monster	Hydra
+monster	Hyena
+monster	Ice Devil
+monster	Ice Mephit
+monster	Imp
+monster	Invisible Stalker
+monster	Iron Golem
+monster	Jackal
+monster	Kenku
+monster	Killer Whale
+monster	Knight
+monster	Kobold
+monster	Kraken
+monster	Kuo-Toa
+monster	Kuo-Toa Archpriest
+monster	Kuo-Toa Monitor
+monster	Kuo-Toa Whip
+monster	Lamia
+monster	Lemure
+monster	Lich
+monster	Lion
+monster	Lizard
+monster	Lizardfolk
+monster	Mage
+monster	Magma Mephit
+monster	Magmin
+monster	Mammoth
+monster	Manticore
+monster	Marilith
+monster	Mastiff
+monster	Medusa
+monster	Merfolk
+monster	Merrow
+monster	Mimic
+monster	Minotaur
+monster	Minotaur Skeleton
+monster	Mule
+monster	Mummy
+monster	Mummy Lord
+monster	Nalfeshnee
+monster	Night Hag
+monster	Nightmare
+monster	Noble
+monster	Nothic
+monster	Ochre Jelly
+monster	Octopus
+monster	Ogre
+monster	Ogre Zombie
+monster	Oni
+monster	Orc
+monster	Otyugh
+monster	Owl
+monster	Owlbear
+monster	Panther
+monster	Pegasus
+monster	Phase Spider
+monster	Piercer
+monster	Pit Fiend
+monster	Planetar
+monster	Plesiosaurus
+monster	Poisonous Snake
+monster	Polar Bear
+monster	Pony
+monster	Priest
+monster	Pseudodragon
+monster	Purple Worm
+monster	Quasit
+monster	Quipper
+monster	Rakshasa
+monster	Rat
+monster	Raven
+monster	Red Dragon Wyrmling
+monster	Reef Shark
+monster	Remorhaz
+monster	Rhinoceros
+monster	Riding Horse
+monster	Roc
+monster	Roper
+monster	Rug of Smothering
+monster	Rust Monster
+monster	Saber-Toothed Tiger
+monster	Sahuagin
+monster	Salamander
+monster	Satyr
+monster	Scorpion
+monster	Scout
+monster	Sea Hag
+monster	Sea Horse
+monster	Shadow
+monster	Shadow Demon
+monster	Shambling Mound
+monster	Shield Guardian
+monster	Shrieker
+monster	Silver Dragon Wyrmling
+monster	Skeleton
+monster	Solar
+monster	Specter
+monster	Spider
+monster	Spirit Naga
+monster	Sprite
+monster	Spy
+monster	Steam Mephit
+monster	Stirge
+monster	Stone Giant
+monster	Stone Golem
+monster	Stonemelder
+monster	Storm Giant
+monster	Succubus/Incubus
+monster	Swarm of Bats
+monster	Swarm of Beetles
+monster	Swarm of Centipedes
+monster	Swarm of Insects
+monster	Swarm of Poisonous Snakes
+monster	Swarm of Quippers
+monster	Swarm of Rats
+monster	Swarm of Ravens
+monster	Swarm of Spiders
+monster	Swarm of Wasps
+monster	Tarrasque
+monster	Thug
+monster	Tiger
+monster	Treant
+monster	Tribal Warrior
+monster	Triceratops
+monster	Troll
+monster	Tyrannosaurus Rex
+monster	Unicorn
+monster	Unknown spell
+monster	Vampire
+monster	Vampire Spawn
+monster	Veteran
+monster	Violet Fungus
+monster	Vrock
+monster	Vulture
+monster	Warhorse
+monster	Warhorse Skeleton
+monster	Water Elemental
+monster	Weasel
+monster	Werebear, Bear Form
+monster	Werebear, Human Form
+monster	Werebear, Hybrid Form
+monster	Wereboar, Boar Form
+monster	Wereboar, Human Form
+monster	Wereboar, Hybrid Form
+monster	Wererat, Human Form
+monster	Wererat, Hybrid Form
+monster	Wererat, Rat Form
+monster	Weretiger, Human Form
+monster	Weretiger, Hybrid Form
+monster	Weretiger, Tiger Form
+monster	Werewolf, Human Form
+monster	Werewolf, Hybrid Form
+monster	Werewolf, Wolf Form
+monster	White Dragon Wyrmling
+monster	Wight
+monster	Will-o'-Wisp
+monster	Winged Kobold
+monster	Winter Wolf
+monster	Wolf
+monster	Worg
+monster	Wraith
+monster	Wyvern
+monster	Xorn
+monster	Young Black Dragon
+monster	Young Blue Dragon
+monster	Young Brass Dragon
+monster	Young Bronze Dragon
+monster	Young Copper Dragon
+monster	Young Gold Dragon
+monster	Young Green Dragon
+monster	Young Red Dragon
+monster	Young Silver Dragon
+monster	Young White Dragon
+monster	Zombie
+item	Adamantine Armor
+item	Ammunition +1
+item	Amulet of Health
+item	Amulet of Proof against Detection and Location
+item	Amulet of the Planes
+item	Animated Shield
+item	Apparatus of the Crab
+item	Armor of Invulnerability
+item	Armor of Resistance
+item	Armor of Vulnerability
+item	Arrow of Slaying
+item	Arrow-Catching Shield
+item	Bag of Beans
+item	Bag of Devouring
+item	Bag of Holding
+item	Bag of Tricks
+item	Bead of Force
+item	Belt of Dwarvenkind
+item	Belt of Giant Strength
+item	Boots of Elvenkind
+item	Boots of Levitation
+item	Boots of Speed
+item	Boots of Striding and Springing
+item	Boots of the Winterlands
+item	Bowl of Commanding Water Elementals
+item	Bracers of Archery
+item	Bracers of Defense
+item	Brazier of Commanding Fire Elementals
+item	Brooch of Shielding
+item	Broom of Flying
+item	Candle of Invocation
+item	Cape of the Mountebank
+item	Carpet of Flying
+item	Censer of Controlling Air Elementals
+item	Chime of Opening
+item	Circlet of Blasting
+item	Cloak of Arachnida
+item	Cloak of Displacement
+item	Cloak of Elvenkind
+item	Cloak of Protection
+item	Cloak of the Bat
+item	Cloak of the Manta Ray
+item	Crystal Ball
+item	Cube of Force
+item	Cubic Gate
+item	Dagger of Venom
+item	Dancing Sword
+item	Decanter of Endless Water
+item	Deck of Illusions
+item	Deck of Many Things
+item	Defender
+item	Demon Armor
+item	Dimensional Shackles
+item	Dragon Scale Mail
+item	Dragon Slayer
+item	Dust of Disappearance
+item	Dust of Dryness
+item	Dust of Sneezing and Choking
+item	Dwarven Plate
+item	Dwarven Thrower
+item	Efficient Quiver
+item	Efreeti Bottle
+item	Elemental Gem
+item	Elven Chain
+item	Eversmoking Bottle
+item	Eyes of Charming
+item	Eyes of Minute Seeing
+item	Eyes of the Eagle
+item	Feather Token
+item	Figurine of Wondrous Power
+item	Flame Tongue
+item	Folding Boat
+item	Frost Brand
+item	Gauntlets of Ogre Power
+item	Gem of Brightness
+item	Gem of Seeing
+item	Giant Slayer
+item	Glamoured Studded Leather
+item	Gloves of Missile Snaring
+item	Gloves of Swimming and Climbing
+item	Goggles of Night
+item	Hammer of Thunderbolts
+item	Handy Haversack
+item	Hat of Disguise
+item	Headband of Intellect
+item	Helm of Brilliance
+item	Helm of Comprehending Languages
+item	Helm of Telepathy
+item	Helm of Teleportation
+item	Holy Avenger
+item	Horn of Blasting
+item	Horn of Valhalla
+item	Horseshoes of Speed
+item	Horseshoes of a Zephyr
+item	Immovable Rod
+item	Instant Fortress
+item	Ioun Stone
+item	Iron Bands of Binding
+item	Iron Flask
+item	Javelin of Lightning
+item	Lantern of Revealing
+item	Luck Blade
+item	Mace of Disruption
+item	Mace of Smiting
+item	Mace of Terror
+item	Mantle of Spell Resistance
+item	Manual of Bodily Health
+item	Manual of Gainful Exercise
+item	Manual of Golems
+item	Manual of Quickness of Action
+item	Marvelous Pigments
+item	Medallion of Thoughts
+item	Mirror of Life Trapping
+item	Mithral Armor
+item	Necklace of Adaptation
+item	Necklace of Fireballs
+item	Necklace of Prayer Beads
+item	Nine Lives Stealer
+item	Oathbow
+item	Oil of Etherealness
+item	Oil of Sharpness
+item	Oil of Slipperiness
+item	Pearl of Power
+item	Periapt of Health
+item	Periapt of Proof against Poison
+item	Periapt of Wound Closure
+item	Philter of Love
+item	Pipes of Haunting
+item	Pipes of the Sewers
+item	Plate Armor of Etherealness
+item	Portable Hole
+item	Potion of Animal Friendship
+item	Potion of Clairvoyance
+item	Potion of Climbing
+item	Potion of Diminution
+item	Potion of Flying
+item	Potion of Gaseous Form
+item	Potion of Giant Strength
+item	Potion of Greater Healing
+item	Potion of Growth
+item	Potion of Healing
+item	Potion of Heroism
+item	Potion of Invisibility
+item	Potion of Mind Reading
+item	Potion of Poison
+item	Potion of Resistance
+item	Potion of Speed
+item	Potion of Superior Healing
+item	Potion of Supreme Healing
+item	Potion of Water Breathing
+item	Ring of Animal Influence
+item	Ring of Djinni Summoning
+item	Ring of Elemental Command
+item	Ring of Evasion
+item	Ring of Feather Falling
+item	Ring of Free Action
+item	Ring of Invisibility
+item	Ring of Jumping
+item	Ring of Mind Shielding
+item	Ring of Protection
+item	Ring of Regeneration
+item	Ring of Resistance
+item	Ring of Shooting Stars
+item	Ring of Spell Storing
+item	Ring of Spell Turning
+item	Ring of Swimming
+item	Ring of Telekinesis
+item	Ring of Three Wishes
+item	Ring of Warmth
+item	Ring of Water Walking
+item	Ring of X-ray Vision
+item	Robe of Eyes
+item	Robe of Scintillating Colors
+item	Robe of Stars
+item	Robe of Useful Items
+item	Robe of the Archmagi
+item	Rod of Absorption
+item	Rod of Alertness
+item	Rod of Lordly Might
+item	Rod of Rulership
+item	Rod of Security
+item	Rope of Climbing
+item	Rope of Entanglement
+item	Scarab of Protection
+item	Scimitar of Speed
+item	Scroll of Protection
+item	Shield +1
+item	Slippers of Spider Climbing
+item	Sovereign Glue
+item	Spell Scroll
+item	Spellguard Shield
+item	Sphere of Annihilation
+item	Staff of Charming
+item	Staff of Fire
+item	Staff of Frost
+item	Staff of Healing
+item	Staff of Power
+item	Staff of Striking
+item	Staff of Swarming Insects
+item	Staff of Thunder and Lightning
+item	Staff of Withering
+item	Staff of the Adder
+item	Staff of the Magi
+item	Staff of the Python
+item	Staff of the Woodlands
+item	Stone of Controlling Earth Elementals
+item	Stone of Good Luck
+item	Sun Blade
+item	Sword of Life Stealing
+item	Sword of Sharpness
+item	Sword of Wounding
+item	Talisman of Pure Good
+item	Talisman of Ultimate Evil
+item	Talisman of the Sphere
+item	Tome of Clear Thought
+item	Tome of Leadership and Influence
+item	Tome of Understanding
+item	Trident of Fish Command
+item	Universal Solvent
+item	Vicious Weapon
+item	Vorpal Sword
+item	Wand of Binding
+item	Wand of Enemy Detection
+item	Wand of Fear
+item	Wand of Fireballs
+item	Wand of Lightning Bolts
+item	Wand of Magic Detection
+item	Wand of Magic Missiles
+item	Wand of Paralysis
+item	Wand of Polymorph
+item	Wand of Secrets
+item	Wand of Web
+item	Wand of Wonder
+item	Weapon +1
+item	Well of Many Worlds
+item	Wind Fan
+item	Winged Boots
+item	Wings of Flying
+deity	Akadi
+deity	Amaunator
+deity	Asmodeus
+deity	Auril
+deity	Avandra
+deity	Azuth
+deity	Bahamut
+deity	Bane
+deity	Beshaba
+deity	Bhaal
+deity	Chauntea
+deity	Corellon Larethian
+deity	Cyric
+deity	Demogorgon
+deity	Deneir
+deity	Eldath
+deity	Erathis
+deity	Garl Glittergold
+deity	Gond
+deity	Grumbar
+deity	Gruumsh
+deity	Helm
+deity	Hoar
+deity	Ilmater
+deity	Ioun
+deity	Istishia
+deity	Jergal
+deity	Kelemvor
+deity	Kord
+deity	Kossuth
+deity	Lathander
+deity	Leira
+deity	Lliira
+deity	Lolth
+deity	Loviatar
+deity	Maglubiyet
+deity	Malar
+deity	Mask
+deity	Melora
+deity	Mielikki
+deity	Milil
+deity	Moradin
+deity	Myrkul
+deity	Mystra
+deity	Oghma
+deity	Orcus
+deity	Pelor
+deity	Red Knight
+deity	Savras
+deity	Sehanine
+deity	Sehanine Moonbow
+deity	Selune
+deity	Shar
+deity	Silvanus
+deity	Sune
+deity	Talona
+deity	Talos
+deity	Tempus
+deity	Tharizdun
+deity	The Platinum Dragon
+deity	The Raven Queen
+deity	The Traveler
+deity	Tiamat
+deity	Torm
+deity	Torog
+deity	Tymora
+deity	Tyr
+deity	Ubtao
+deity	Umberlee
+deity	Valkur
+deity	Vecna
+deity	Waukeen
+deity	Yondalla
+deity	Zehir
