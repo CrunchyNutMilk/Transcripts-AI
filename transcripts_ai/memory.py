@@ -449,6 +449,18 @@ class CampaignMemory:
             for r in rows
         ]
 
+    def remove_alias(self, campaign_id: str, observed: str, *, actor: str,
+                     reason: str) -> bool:
+        """Delete one recorded alias spelling (audited, like forget)."""
+        with self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM aliases WHERE campaign_id=? AND observed_folded=?",
+                (campaign_id, observed.casefold()),
+            )
+            self._audit(campaign_id, "remove_alias", observed, actor,
+                        {"reason": reason})
+        return cur.rowcount > 0
+
     def resolve_alias(self, campaign_id: str, observed: str) -> AliasRecord | None:
         row = self._conn.execute(
             "SELECT * FROM aliases WHERE campaign_id=? AND observed_folded=?",

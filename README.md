@@ -128,6 +128,11 @@ Engine-side additions on the same branch:
   Discord recordings arrive with one track per speaker, so transcripts come
   out speaker-labelled with no diarization; `mapping.json` turns usernames
   into character names.
+- **`/game_dictionary` for Discord** (`transcripts_ai/dictionary.py` +
+  drop-in cog `integrations/discord_game_dictionary.py`): lookup / fix /
+  undo / recent from the table. Every fix is a human decision — instant
+  resolver upgrade, a training record, a scorecard question, and one
+  fewer review item, all at once. DM-role gated, audited, reversible.
 - **Campaign-generic by construction**: knowledge lives only in per-campaign
   memory, mapping.json and vault folder; a test proves two campaigns in one
   database can never cross.
