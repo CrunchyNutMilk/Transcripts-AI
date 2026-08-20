@@ -306,6 +306,52 @@ def cmd_overnight(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_quiz(args: argparse.Namespace) -> int:
+    from . import quiz as quiz_mod
+    memory = CampaignMemory(args.db)
+    try:
+        items = quiz_mod.generate_quiz(memory, args.campaign, args.session,
+                                       count=args.count)
+    finally:
+        memory.close()
+    if not items:
+        print(f"no verified facts for session {args.session}; process it first")
+        return 1
+    if args.out_bank:
+        scorecard_mod.write_bank(args.out_bank, [i.question for i in items])
+        print(f"{len(items)} question(s) -> {args.out_bank}")
+    if args.out_md:
+        Path(args.out_md).write_text(
+            quiz_mod.render_quiz_markdown(items, campaign_id=args.campaign,
+                                          session_id=args.session),
+            encoding="utf-8")
+        print(f"Discord-ready quiz -> {args.out_md}")
+    if not args.out_bank and not args.out_md:
+        for number, item in enumerate(items, start=1):
+            print(f"{number}. {item.question.question}")
+    return 0
+
+
+def cmd_time_travel(args: argparse.Namespace) -> int:
+    from . import timetravel
+    paths: list[str] = []
+    for raw in args.transcripts:
+        path = Path(raw)
+        if path.is_dir():
+            paths.extend(str(p) for p in sorted(path.glob("*.md")))
+        else:
+            paths.append(raw)
+    if len(paths) < 2:
+        print("time-travel needs at least two transcripts")
+        return 2
+    steps = timetravel.run_time_travel(
+        paths, campaign_id=args.campaign, db_path=args.db)
+    report = timetravel.render_report(steps, campaign_id=args.campaign)
+    Path(args.out).write_text(report, encoding="utf-8")
+    print(f"report -> {args.out}")
+    return 0
+
+
 def cmd_names_check(args: argparse.Namespace) -> int:
     from ..dnd5e import scan_text
 
@@ -504,6 +550,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--teachers", help="override the TEACHERS env spec")
     p.add_argument("--bank", help="question bank for the nightly scorecard")
     p.set_defaults(func=cmd_overnight)
+
+    p = sub.add_parser("quiz",
+                       help="session facts -> Discord recap trivia + bank questions")
+    p.add_argument("--db", required=True)
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--session", required=True)
+    p.add_argument("--count", type=_positive_int, default=10)
+    p.add_argument("--out-bank", help="append-ready scorecard bank JSONL")
+    p.add_argument("--out-md", help="Discord-ready quiz with answer key")
+    p.set_defaults(func=cmd_quiz)
+
+    p = sub.add_parser("time-travel",
+                       help="measure memory compounding across a campaign")
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--db", required=True,
+                   help="throwaway working DB (created fresh; never your real one)")
+    p.add_argument("--out", required=True, help="Markdown report path")
+    p.add_argument("--transcripts", nargs="+", required=True,
+                   help="Mapped transcript files or a directory of them")
+    p.set_defaults(func=cmd_time_travel)
 
     p = sub.add_parser("names-check",
                        help="find official 5e names (and manglings) in a transcript")
