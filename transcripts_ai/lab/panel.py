@@ -262,8 +262,12 @@ def decide(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
     single real teacher bank records alone."""
     votes = [o for o in opinions if o.verdict in ("accept", "reject")]
     teacher_votes = [o for o in votes if o.teacher != ENGINE_NAME]
-    uncertain = [o for o in opinions if o.verdict == "uncertain"]
-    if len(teacher_votes) < min_votes or uncertain:
+    # Only TEACHER uncertainty blocks: the engine's uncertain (its SUGGEST
+    # band) is the very reason the item reached the panel — the teachers
+    # exist to resolve it, not to be vetoed by it.
+    uncertain_teachers = [o for o in opinions
+                          if o.verdict == "uncertain" and o.teacher != ENGINE_NAME]
+    if len(teacher_votes) < min_votes or uncertain_teachers:
         return PanelResult(item=item, opinions=opinions, decision="queue",
                            gate_note="not enough agreement to bank")
     if all(o.verdict == "accept" for o in votes):
@@ -272,6 +276,15 @@ def decide(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
             return PanelResult(item=item, opinions=opinions, decision="queue",
                                gate_note="accepts disagree on the choice")
         agreed = votes[0].choice.strip()
+        engine_uncertain = next(
+            (o for o in opinions
+             if o.teacher == ENGINE_NAME and o.verdict == "uncertain"), None)
+        if (engine_uncertain and engine_uncertain.choice
+                and engine_uncertain.choice.casefold().strip()
+                != agreed.casefold()):
+            return PanelResult(item=item, opinions=opinions, decision="queue",
+                               agreed_choice=agreed,
+                               gate_note="engine suggests a different name")
         ok, note = evidence_gate(memory, campaign_id, item, agreed)
         if not ok:
             return PanelResult(item=item, opinions=opinions, decision="queue",
@@ -294,6 +307,22 @@ def decide(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
 # Running the panel
 # ---------------------------------------------------------------------------
 
+def panel_item(
+    memory: CampaignMemory,
+    campaign_id: str,
+    item: ReviewItem,
+    teachers: list[Teacher],
+    *,
+    min_votes: int = MIN_VOTES_TO_BANK,
+) -> PanelResult:
+    """One item through the whole panel. Read-only on memory."""
+    known = known_names_for(memory, campaign_id, item)
+    prompt = build_panel_prompt(item, known)
+    opinions = [engine_opinion(memory, campaign_id, item)]
+    opinions += [teacher_opinion(teacher, prompt) for teacher in teachers]
+    return decide(memory, campaign_id, item, opinions, min_votes=min_votes)
+
+
 def run_panel(
     memory: CampaignMemory,
     campaign_id: str,
@@ -304,15 +333,8 @@ def run_panel(
 ) -> list[PanelResult]:
     """Ask the panel about each item. Read-only on memory, by construction:
     everything this touches is a query; results live in the returned list."""
-    results: list[PanelResult] = []
-    for item in items:
-        known = known_names_for(memory, campaign_id, item)
-        prompt = build_panel_prompt(item, known)
-        opinions = [engine_opinion(memory, campaign_id, item)]
-        opinions += [teacher_opinion(teacher, prompt) for teacher in teachers]
-        results.append(decide(memory, campaign_id, item, opinions,
-                              min_votes=min_votes))
-    return results
+    return [panel_item(memory, campaign_id, item, teachers, min_votes=min_votes)
+            for item in items]
 
 
 # ---------------------------------------------------------------------------

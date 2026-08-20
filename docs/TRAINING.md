@@ -94,7 +94,19 @@ Non-negotiables:
 ### Implemented so far (`python -m transcripts_ai.lab`)
 
 Layer 1 (measurement): `export-records`, `tally`, `split`, `make-bank`,
-`score`. Layer 2a (the teacher panel):
+`score`. Layer 2b (the overnight loop) wraps everything below into one
+command that checkpoints after every item — a crash or Ctrl-C loses
+nothing, and re-running the same `--out-dir` resumes without re-paying:
+
+```powershell
+python -m transcripts_ai.lab overnight --db campaign.sqlite --campaign heckuva `
+    --out-dir nights\2026-08-20 --max-items 100 --bank bank.jsonl
+# wake up to nights\2026-08-20\morning_report.md:
+#   banked accepts/rejects, your pre-answered morning questions,
+#   teacher health (abstention counts), spend per teacher, scorecard trend
+```
+
+Layer 2a (the teacher panel):
 
 ```powershell
 # who is on the panel (no API calls)

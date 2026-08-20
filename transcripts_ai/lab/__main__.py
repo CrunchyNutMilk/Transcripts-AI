@@ -33,6 +33,7 @@ from pathlib import Path
 
 from ..memory import CampaignMemory
 from . import gold as gold_mod
+from . import overnight as overnight_mod
 from . import panel as panel_mod
 from . import records as records_mod
 from . import scorecard as scorecard_mod
@@ -210,6 +211,44 @@ def cmd_panel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_overnight(args: argparse.Namespace) -> int:
+    teachers, skipped = discover_teachers(dict(os.environ), spec=args.teachers)
+    for skip in skipped:
+        print(f"skipped teacher {skip.spec}: {skip.reason}")
+    if not teachers:
+        print("no teachers are ready; set TEACHERS (see the `teachers` command)")
+        return 1
+    print("overnight loop: " + ", ".join(f"{t.name} ({t.model})" for t in teachers))
+
+    memory = CampaignMemory(args.db)
+    try:
+        answerer = None
+        if args.bank:
+            answerer = memory_answerer(memory, args.campaign)
+        report = overnight_mod.run_overnight(
+            memory, args.campaign, teachers,
+            out_dir=args.out_dir,
+            session_id=args.session,
+            max_items=args.max_items,
+            min_votes=args.min_votes,
+            bank_path=args.bank,
+            answerer=answerer,
+        )
+    finally:
+        memory.close()
+
+    print(f"\nasked {report.processed_tonight} item(s): "
+          f"{report.bank_accept} banked accept, {report.bank_reject} banked "
+          f"reject, {report.queued} queued for you")
+    if report.remaining_pending:
+        print(f"{report.remaining_pending} pending item(s) left for another "
+              "night (or raise --max-items)")
+    if report.scorecard_line:
+        print(f"scorecard: {report.scorecard_line}")
+    print(f"morning report -> {report.out_dir}/morning_report.md")
+    return 0
+
+
 def cmd_whisper_prompt(args: argparse.Namespace) -> int:
     memory = CampaignMemory(args.db)
     try:
@@ -341,6 +380,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true",
                    help="show teachers + first prompt; make no API calls")
     p.set_defaults(func=cmd_panel)
+
+    p = sub.add_parser("overnight",
+                       help="run the whole overnight loop: panel -> bank -> "
+                            "queue -> scorecard -> morning report")
+    p.add_argument("--db", required=True)
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--out-dir", required=True,
+                   help="night's working directory (re-use it to resume)")
+    p.add_argument("--session", help="only items from this session")
+    p.add_argument("--max-items", type=_positive_int,
+                   default=overnight_mod.DEFAULT_MAX_ITEMS,
+                   help="hard spend cap on panel items per night")
+    p.add_argument("--min-votes", type=_positive_int,
+                   default=panel_mod.MIN_VOTES_TO_BANK,
+                   help="teacher votes (excluding the engine) needed to bank")
+    p.add_argument("--teachers", help="override the TEACHERS env spec")
+    p.add_argument("--bank", help="question bank for the nightly scorecard")
+    p.set_defaults(func=cmd_overnight)
 
     p = sub.add_parser("whisper-prompt",
                        help="build a Whisper initial_prompt from campaign names")

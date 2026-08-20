@@ -144,10 +144,29 @@ class TestDecide:
             ("accept", "Ghomra"), ("reject", ""), ("accept", "Ghomra")))
         assert result.decision == "queue"
 
-    def test_any_uncertainty_queues(self, memory):
+    def test_teacher_uncertainty_queues(self, memory):
         result = decide(memory, CAMPAIGN, make_item(), self._opinions(
             ("accept", "Ghomra"), ("uncertain", "Ghomra"), ("accept", "Ghomra")))
         assert result.decision == "queue"
+
+    def test_engine_uncertainty_does_not_veto_agreeing_teachers(self, memory):
+        # The engine's SUGGEST band is WHY the item reached the panel; when
+        # the teachers unanimously confirm its own suggestion, that banks.
+        opinions = [Opinion(teacher="engine", verdict="uncertain",
+                            choice="Ghomra"),
+                    Opinion(teacher="gpt", verdict="accept", choice="Ghomra"),
+                    Opinion(teacher="claude", verdict="accept", choice="Ghomra")]
+        result = decide(memory, CAMPAIGN, make_item(), opinions)
+        assert result.decision == "bank_accept"
+
+    def test_engine_uncertain_with_other_name_still_queues(self, memory):
+        opinions = [Opinion(teacher="engine", verdict="uncertain",
+                            choice="Gomrad"),
+                    Opinion(teacher="gpt", verdict="accept", choice="Ghomra"),
+                    Opinion(teacher="claude", verdict="accept", choice="Ghomra")]
+        result = decide(memory, CAMPAIGN, make_item(), opinions)
+        assert result.decision == "queue"
+        assert "different name" in result.gate_note
 
     def test_accepts_disagreeing_on_choice_queue(self, memory):
         item = make_item(suggestions=[{"canonical": "Ghomra", "score": 0.9},
