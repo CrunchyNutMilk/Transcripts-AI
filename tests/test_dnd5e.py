@@ -240,3 +240,118 @@ class TestKnownMentionsInSummary:
                         if "nadar" in i.subject.casefold()]
         finally:
             memory.close()
+
+
+class TestAuditHardening:
+    """Regressions from the 5e-layer adversarial review."""
+
+    def test_no_placeholder_or_duplicate_names(self):
+        names = official_names()
+        assert not [n for n in names
+                    if n.casefold().startswith(("unknown", "generic"))]
+        assert names["Bane"] == "spell"      # first category wins, not deity
+
+    def test_registrable_blocks_dictionary_statblock_words(self):
+        for word in ("Druid", "Mage", "Bane", "Weasel", "Sprite", "Shatter"):
+            assert not is_registrable(word), word
+        for word in ("Aboleth", "Tiamat"):
+            assert is_registrable(word), word
+
+    def test_all_common_multiword_names_not_registrable(self):
+        assert not is_registrable("Black Bear")
+        assert is_registrable("Horn of Blasting")
+
+    def test_seven_token_name_is_scannable(self):
+        mentions, _ = scan_text(
+            t("she wears an amulet of proof against detection and location"))
+        assert mentions["Amulet of Proof against Detection and Location"] == 1
+
+    def test_single_token_phonetic_near_miss_reachable(self):
+        near = nearest_official("teamat")
+        assert near is not None and near.official == "Tiamat"
+
+    def test_registration_never_touches_existing_entities(self, tmp_path):
+        from transcripts_ai.schemas import EntityRecord
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "DM: you find a horn of blasting under the altar.\n",
+            encoding="utf-8")
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            memory.upsert_entity(
+                EntityRecord(name="Horn of Blasting", kind=EntityKind.ITEM,
+                             campaign_id="camp",
+                             description="The horn Gomph destroyed at the tree"),
+                actor="human:reviewer")
+            SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1")
+            entity = memory.find_entity("camp", "Horn of Blasting")
+            assert entity.description == "The horn Gomph destroyed at the tree"
+            assert "official_5e" not in entity.attributes
+        finally:
+            memory.close()
+
+    def test_direction_ambiguous_cues_never_make_loot(self, tmp_path):
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "Jinx: i hand the wand of fear over to the shopkeeper for the "
+            "reward money.\n",
+            encoding="utf-8")
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1")
+            assert not [f for f in report.facts_verified
+                        if f.category.value == "loot"]
+        finally:
+            memory.close()
+
+    def test_player_loot_claim_goes_to_review_not_verified(self, tmp_path):
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "Diego: I got the necklace of prayer beads and then, uh,\n",
+            encoding="utf-8")
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1")
+            verified_loot = [f for f in report.facts_verified
+                             if f.category.value == "loot"]
+            assert not verified_loot
+            assert any("Necklace of Prayer Beads" in f.statement
+                       for f in report.facts_disputed)
+        finally:
+            memory.close()
+
+    def test_one_award_one_fact(self, tmp_path):
+        # capitalised award: classic rule AND official pass both see it
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "DM: You find a Necklace of Prayer Beads in the chest.\n",
+            encoding="utf-8")
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1")
+            loot = [f for f in report.facts_verified
+                    if f.category.value == "loot"]
+            assert len(loot) == 1
+        finally:
+            memory.close()
+
+    def test_curated_fixes_survive_official_protection(self, tmp_path):
+        from transcripts_ai.spellcheck import SpellChecker
+        from transcripts_ai.transcript import parse_transcript
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            parsed = parse_transcript("DM: wich way did he go\n",
+                                      source_path="x")
+            corrections = SpellChecker(memory).find_corrections(parsed, "camp")
+            fixed = {c.original: c.corrected for c in corrections}
+            assert fixed.get("wich") == "which"
+        finally:
+            memory.close()

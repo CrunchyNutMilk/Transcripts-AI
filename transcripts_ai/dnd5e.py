@@ -41,7 +41,12 @@ def _tokens(text: str) -> list[str]:
 
 @lru_cache(maxsize=1)
 def official_names() -> dict[str, str]:
-    """Official name -> category ('spell' | 'monster' | 'item' | 'deity')."""
+    """Official name -> category ('spell' | 'monster' | 'item' | 'deity').
+
+    Defensive on load: placeholder rows ("Unknown …", "Generic …") are
+    ignored, and a name listed under two categories keeps its FIRST one
+    (the data file lists spells before deities, so "Bane" is the spell).
+    """
     names: dict[str, str] = {}
     raw = (resources.files("transcripts_ai.data") / "dnd5e_names.txt").read_text(
         encoding="utf-8")
@@ -49,25 +54,30 @@ def official_names() -> dict[str, str]:
         if not line.strip() or line.startswith("#"):
             continue
         category, _, name = line.partition("\t")
-        if name.strip():
-            names[name.strip()] = category.strip()
+        name = name.strip()
+        if (not name or name.casefold().startswith(("unknown", "generic"))
+                or name in names):
+            continue
+        names[name] = category.strip()
     return names
 
 
 @lru_cache(maxsize=1)
-def _index() -> tuple[dict[tuple[str, ...], str], dict[str, list[str]]]:
-    """(exact n-gram -> official name, anchor token -> official names)."""
+def _index() -> tuple[dict[tuple[str, ...], str], dict[str, list[str]], int]:
+    """(exact n-gram -> name, anchor token -> names, longest name tokens)."""
     exact: dict[tuple[str, ...], str] = {}
     anchors: dict[str, list[str]] = {}
+    longest = 1
     for name in official_names():
         toks = tuple(_tokens(name))
         if not toks:
             continue
         exact[toks] = name
+        longest = max(longest, len(toks))
         for token in set(toks):
             if len(token) >= 4 and zipf(token) < _COMMON_ANCHOR_ZIPF:
                 anchors.setdefault(token, []).append(name)
-    return exact, anchors
+    return exact, anchors, longest
 
 
 _WEAPON_WORDS = frozenset(
@@ -99,15 +109,30 @@ def kind_for(name: str) -> EntityKind:
 def is_registrable(name: str) -> bool:
     """Safe to auto-register as an entity from a bare mention?
 
-    Multi-word official names ("Horn of Blasting") cannot be accidental.
-    A single-token name only qualifies when the word is rare English
-    ("Aboleth" yes; the spells "Command", "Light", "Fly" would register
-    on everyday speech and are left to evidence-based extraction).
+    Registration must never fire on everyday speech, so the gate is
+    tighter than mere rarity:
+
+    - single-token names qualify only when genuinely fantasy vocabulary:
+      rare AND (very rare or not an English dictionary word). "Aboleth"
+      and "Tiamat" pass; the statblock/class words "Druid", "Mage",
+      "Bane", "Weasel", "Sprite", "Shatter" are all dictionary English
+      and stay out.
+    - multi-word names qualify unless EVERY token is common English —
+      "Horn of Blasting" passes on "blasting"-rarity grounds, while
+      "Black Bear" walking past the party stays a mention, never an
+      auto-created entity.
     """
+    from .wordlist import is_dictionary_word
+
     toks = _tokens(name)
+    if not toks:
+        return False
     if len(toks) >= 2:
-        return True
-    return bool(toks) and zipf(toks[0]) < _RARE_SINGLE_ZIPF
+        return any(zipf(t) < _COMMON_ANCHOR_ZIPF for t in toks)
+    token = toks[0]
+    if zipf(token) >= _RARE_SINGLE_ZIPF:
+        return False
+    return zipf(token) < 2.6 or not is_dictionary_word(token)
 
 
 @lru_cache(maxsize=1)
@@ -145,12 +170,15 @@ def _window_score(window: tuple[str, ...], target: tuple[str, ...]) -> float:
     total = 0.0
     for heard, truth in zip(window, target):
         ratio = SequenceMatcher(a=heard, b=truth).ratio()
-        if heard != truth and ratio < _TOKEN_RATIO:
-            # Character-distant but phonetically identical ("steph"/"staff")
-            # is exactly the mangle Whisper makes; sound rescues it.
-            if phonetic_key(heard) != phonetic_key(truth):
+        if heard != truth:
+            # Phonetically identical tokens ("steph"/"staff",
+            # "teamat"/"tiamat") are exactly the mangle Whisper makes;
+            # sound lifts them above the window bar so even a
+            # single-token name is reachable on phonetics alone.
+            if phonetic_key(heard) == phonetic_key(truth):
+                ratio = max(ratio, 0.86)
+            elif ratio < _TOKEN_RATIO:
                 return 0.0
-            ratio = max(ratio, _TOKEN_RATIO)
         total += ratio
     return total / len(target)
 
@@ -158,10 +186,10 @@ def _window_score(window: tuple[str, ...], target: tuple[str, ...]) -> float:
 def _exact_in_tokens(toks: list[str]) -> tuple[list[str], set[int]]:
     """Official names exactly present in a token list, longest-match-first.
     Returns (names in order found, token positions they occupy)."""
-    exact, _ = _index()
+    exact, _, longest = _index()
     found: list[str] = []
     occupied: set[int] = set()
-    for size in range(min(6, len(toks)), 0, -1):
+    for size in range(min(longest, len(toks)), 0, -1):
         for start in range(len(toks) - size + 1):
             if any(p in occupied for p in range(start, start + size)):
                 continue
@@ -188,8 +216,7 @@ def nearest_official(text: str) -> NearMiss | None:
     toks = tuple(_tokens(text))
     if not toks:
         return None
-    _, anchors = _index()
-    exact, _ = _index()
+    exact, anchors, _ = _index()
     if toks in exact:
         name = exact[toks]
         return NearMiss(heard=text, official=name,
@@ -216,11 +243,12 @@ def scan_text(text: str) -> tuple[Counter, list[NearMiss]]:
     Works on a raw transcript: only speaker-line text is scanned, so a
     speaker named "Wolf" never counts as a monster mention.
     """
-    exact, anchors = _index()
+    exact, anchors, _ = _index()
     parsed = parse_transcript(text, source_path="<names-check>")
     mentions: Counter = Counter()
-    suspects: list[NearMiss] = []
-    seen_windows: set[tuple[int, tuple[str, ...]]] = set()
+    # Best official name per (line, window), by score — the first name in
+    # an anchor's list must never shadow a better-scoring one.
+    best: dict[tuple[int, tuple[str, ...]], NearMiss] = {}
 
     for entry in parsed.entries:
         toks = _tokens(entry.text)
@@ -236,17 +264,18 @@ def scan_text(text: str) -> tuple[Counter, list[NearMiss]]:
                 size = len(target)
                 for start in range(max(0, position - size + 1), position + 1):
                     window = tuple(toks[start:start + size])
-                    if len(window) < size or (entry.line_number, window) in seen_windows:
+                    if len(window) < size or window == target:
                         continue
-                    if window == target:
-                        continue        # exact already counted (or subset)
                     score = _window_score(window, target)
-                    if score >= _WINDOW_RATIO:
-                        seen_windows.add((entry.line_number, window))
-                        suspects.append(NearMiss(
+                    if score < _WINDOW_RATIO:
+                        continue
+                    key = (entry.line_number, window)
+                    current = best.get(key)
+                    if current is None or score > current.score:
+                        best[key] = NearMiss(
                             heard=" ".join(window), official=name,
                             category=official_names()[name],
                             line=entry.line_number, score=round(score, 3),
-                        ))
-    suspects.sort(key=lambda s: (-s.score, s.line))
+                        )
+    suspects = sorted(best.values(), key=lambda s: (-s.score, s.line))
     return mentions, suspects

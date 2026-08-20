@@ -167,15 +167,17 @@ def _known_name_normaliser(known_entities: frozenset[str]):
 # capitalised item name, which lowercase per-speaker transcripts (Craig)
 # never provide — official 5e names close that gap because the reference
 # list is exact regardless of how Whisper cased the words.
+# Receive-direction cues ONLY: "hands it over", "goes to", "the treasure"
+# are direction-ambiguous ("I hand the wand to the shopkeeper" is a LOSS)
+# and stay out — a missed award costs a review item, a fabricated one
+# poisons the record.
 _ACQUIRE_CUE = re.compile(
-    r"(?i)(?:\b(?:you|i|we|he|she|they)(?:'ll|'ve|'d| will| would)?\s+"
+    r"(?i)(?:\b(?:you|i|we)(?:'ll|'ve|'d| will| would)?\s+"
     r"(?:\w+\s+){0,2}?"
-    r"(?:find|found|finds|receive|received|get|gets|got|take|takes|took|"
-    r"grab|grabs|claim|claims|keep|keeps|attune|attunes|hold|holds)\b"
-    r"|\bhands? (?:you|over|it|him|her|them)\b"
-    r"|\bgives? (?:you|him|her|them|it)\b"
-    r"|\bgoes to\b|\bcommunity chest\b|\byour reward\b"
-    r"|\bthe treasure\b|\bpicks? up\b|\bi'?ll take\b)",
+    r"(?:find|found|finds|receive|received|get|gets|got|claim|claims|"
+    r"keep|keeps|attune|attunes)\b"
+    r"|\bhands? you\b|\bgives? you\b"
+    r"|\bcommunity chest\b|\byour reward\b|\bi'?ll take\b)",
 )
 
 # The cue must sit NEXT TO the item, not merely share a long line with it:
@@ -205,6 +207,7 @@ def _cue_near_item(text: str, item_name: str) -> bool:
 def _official_item_facts(
     entries: list[TranscriptEntry],
     seen: set[tuple[str, int]],
+    existing: list[Fact],
     *,
     campaign_id: str,
     session_id: str,
@@ -236,8 +239,15 @@ def _official_item_facts(
         if key in seen:
             continue
         seen.add(key)
+        if any(f.category is FactCategory.LOOT
+               and f.provenance.line_start == entry.line_number
+               and mention.name.casefold() in f.statement.casefold()
+               for f in existing):
+            continue      # the classic loot rule already caught this award
         speaker_mode = assess_speaker_mode(entry)
-        confidence = 0.8 if speaker_mode in WORLD_FACT_MODES else 0.7
+        # DM narration confirms an award; a player claiming loot is a lead
+        # for the review queue, never a verified world fact on its own.
+        confidence = 0.8 if speaker_mode in WORLD_FACT_MODES else 0.55
         facts.append(Fact(
             statement=f"The party obtained {mention.name}",
             category=FactCategory.LOOT,
@@ -367,7 +377,7 @@ def extract_native_facts(
             )
 
     facts.extend(_official_item_facts(
-        entries, seen,
+        entries, seen, facts,
         campaign_id=campaign_id, session_id=session_id,
         source_path=source_path, source_hash=source_hash,
     ))

@@ -231,6 +231,12 @@ class SessionPipeline:
             if folded in seen or not is_registrable(mention.name):
                 continue
             seen.add(folded)
+            if self.memory.find_entity(campaign_id, mention.name) is not None:
+                # Already known (possibly human-curated, possibly a
+                # different kind): the reference pass must never touch it —
+                # no description overwrite, no first_seen churn, no
+                # same-name duplicate to shadow the human record.
+                continue
             self.memory.upsert_entity(
                 EntityRecord(
                     name=mention.name,

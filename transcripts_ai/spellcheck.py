@@ -100,27 +100,34 @@ class SpellChecker:
     def __init__(self, memory: CampaignMemory):
         self.memory = memory
 
-    def _protected_tokens(self, campaign_id: str) -> tuple[set[str], set[str]]:
-        """Tokens (and phonetic keys) that belong to the entity lane."""
+    def _protected_tokens(self, campaign_id: str) -> tuple[set[str], set[str], set[str]]:
+        """(exact-protected, fuzzy-protected, phonetic keys).
+
+        Campaign entity/alias tokens get the full treatment: exact,
+        distance-1 AND phonetic protection ("jink" next to the PC "Jinx"
+        is name territory). Official 5e tokens (thunderous, aboleth,
+        tiamat) are exact-only: ~650 rulebook words in the distance-1
+        loop would both crush throughput and shadow curated fixes, and
+        their phonetic keys are coarse enough to shield everyday
+        misspellings ("becuase" shares a key with "pegasus"). A curated
+        Tier-A misspelling is never protected by the rulebook list —
+        "wich" must stay fixable even if some official name contains it.
+        """
         from .dnd5e import protected_tokens as official_5e_tokens
 
-        # Rare tokens of official 5e names (thunderous, aboleth, tiamat)
-        # are rulebook vocabulary, never typos to "fix". Word-level only:
-        # phonetic keys over ~650 rulebook words are so coarse they would
-        # shield everyday misspellings ("becuase" shares a key with
-        # "pegasus"); phonetic protection stays for campaign entities.
-        words: set[str] = set(official_5e_tokens())
+        fuzzy: set[str] = set()
         keys: set[str] = set()
         for entity in self.memory.entities(campaign_id):
             for token in entity.name.casefold().split():
-                words.add(token)
+                fuzzy.add(token)
                 keys.add(phonetic_key(token))
         for alias in self.memory.aliases(campaign_id):
             for token in (alias.observed + " " + alias.canonical).casefold().split():
-                words.add(token)
+                fuzzy.add(token)
                 keys.add(phonetic_key(token))
         keys.discard("")
-        return words, keys
+        exact = fuzzy | (official_5e_tokens() - set(known_misspellings()))
+        return exact, fuzzy, keys
 
     def find_corrections(
         self,
@@ -129,7 +136,8 @@ class SpellChecker:
         *,
         min_confidence: float = DEFAULT_MIN_CONFIDENCE,
     ) -> list[SpellCorrection]:
-        protected_words, protected_keys = self._protected_tokens(campaign_id)
+        protected_words, fuzzy_protected, protected_keys = \
+            self._protected_tokens(campaign_id)
         misspellings = known_misspellings()
 
         # Repetition census: an unknown token used again and again is a term
@@ -152,7 +160,7 @@ class SpellChecker:
                     continue
                 if any(
                     damerau_levenshtein(token, protected, cap=1) <= 1
-                    for protected in protected_words
+                    for protected in fuzzy_protected
                 ):
                     continue
 

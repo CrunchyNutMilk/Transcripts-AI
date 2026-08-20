@@ -436,7 +436,6 @@ spell	True Resurrection
 spell	True Seeing
 spell	True Strike
 spell	Tsunami
-spell	Unknown spell
 spell	Unseen Servant
 spell	Vampiric Touch
 spell	Vicious Mockery
@@ -583,8 +582,6 @@ monster	Frog
 monster	Frost Giant
 monster	Gargoyle
 monster	Gelatinous Cube
-monster	Generic Monster
-monster	Generic creature
 monster	Ghast
 monster	Ghost
 monster	Ghoul
@@ -773,7 +770,6 @@ monster	Triceratops
 monster	Troll
 monster	Tyrannosaurus Rex
 monster	Unicorn
-monster	Unknown spell
 monster	Vampire
 monster	Vampire Spawn
 monster	Veteran
@@ -1065,7 +1061,6 @@ deity	Auril
 deity	Avandra
 deity	Azuth
 deity	Bahamut
-deity	Bane
 deity	Beshaba
 deity	Bhaal
 deity	Chauntea
