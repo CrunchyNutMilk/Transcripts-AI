@@ -38,6 +38,7 @@ from . import overnight as overnight_mod
 from . import panel as panel_mod
 from . import records as records_mod
 from . import scorecard as scorecard_mod
+from . import trainkit as trainkit_mod
 from .answerers import memory_answerer, teacher_answerer
 from .teachers import discover_teachers
 
@@ -234,6 +235,32 @@ def cmd_compile(args: argparse.Namespace) -> int:
         print(f"not compiled: {skipped}")
     print(f"files + compile_report.md -> {args.out_dir}")
     return 0
+
+
+def cmd_train_kit(args: argparse.Namespace) -> int:
+    plan = trainkit_mod.build_plan(args.dataset, base_model=args.base_model)
+    files = trainkit_mod.write_train_kit(plan, args.out_dir,
+                                         model_name=args.model_name)
+    state = "READY" if plan.ready else "NOT READY"
+    print(f"{state}: {plan.sft_train} SFT train / {plan.sft_eval} eval, "
+          f"{plan.dpo_train} DPO pairs "
+          f"(DPO stage {'on' if plan.run_dpo else 'off'}), "
+          f"{plan.epochs} epochs planned")
+    for warning in plan.warnings:
+        print(f"WARNING: {warning}")
+    print(f"wrote {', '.join(files)} -> {args.out_dir}")
+    return 0 if plan.ready else 1
+
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    history = scorecard_mod.read_history(args.history)
+    verdict = trainkit_mod.promotion_verdict(
+        history, candidate=args.candidate, baseline=args.baseline,
+        min_lead=args.min_lead,
+    )
+    print(("PROMOTE" if verdict.promote else "HOLD") + ": "
+          + "; ".join(verdict.reasons))
+    return 0 if verdict.promote else 1
 
 
 def cmd_overnight(args: argparse.Namespace) -> int:
@@ -435,6 +462,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--human-only", action="store_true",
                    help="drop teacher-panel records; train on human decisions only")
     p.set_defaults(func=cmd_compile)
+
+    p = sub.add_parser("train-kit",
+                       help="compiled dataset -> unsloth script, Modelfile, runbook")
+    p.add_argument("--dataset", required=True,
+                   help="compile's --out-dir (sft_*.jsonl / dpo_*.jsonl)")
+    p.add_argument("--out-dir", required=True)
+    p.add_argument("--model-name", default="heckuva-engine")
+    p.add_argument("--base-model", default=trainkit_mod.DEFAULT_BASE_MODEL)
+    p.set_defaults(func=cmd_train_kit)
+
+    p = sub.add_parser("promote",
+                       help="gate: does the candidate's scorecard earn a role?")
+    p.add_argument("--history", required=True)
+    p.add_argument("--candidate", required=True,
+                   help="answerer name as recorded in the history file")
+    p.add_argument("--baseline", default="memory-baseline")
+    p.add_argument("--min-lead", type=float, default=0.02,
+                   help="accuracy lead over the baseline required to pass")
+    p.set_defaults(func=cmd_promote)
 
     p = sub.add_parser("overnight",
                        help="run the whole overnight loop: panel -> bank -> "
