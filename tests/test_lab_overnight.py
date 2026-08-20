@@ -80,7 +80,7 @@ class TestOvernightRun:
         assert len(banked) == 2
         assert all(r.actor.startswith("panel:") for r in banked)
         report_md = (out / "morning_report.md").read_text(encoding="utf-8")
-        assert "Banked automatically" in report_md
+        assert "Banked across the whole out-dir" in report_md
         # memory untouched: both items still pending for the human
         assert len(memory.pending_reviews(CAMPAIGN)) == 2
 
@@ -102,7 +102,8 @@ class TestOvernightRun:
         assert report.processed_tonight == 2       # only the unpaid items
         assert teachers[0].provider.calls == 2     # never re-asked item 1
         # Outputs cover the WHOLE night, first run included, exactly once.
-        assert len(read_results(out / "results.jsonl")) == 3
+        results, corrupt = read_results(out / "results.jsonl")
+        assert len(results) == 3 and corrupt == 0
         assert len(read_records(out / "banked_records.jsonl")) == 3
 
     def test_state_refuses_wrong_campaign(self, memory, tmp_path):
@@ -157,6 +158,108 @@ class TestOvernightRun:
         assert "previous run" in second.scorecard_line
         history = (out / "scorecard_history.jsonl").read_text().splitlines()
         assert len(history) == 2
+
+
+class TestCrashHardening:
+    """Regressions from the adversarial review: torn lines, stale queue
+    rows, concurrent runs, futile-night guard, whole-night accounting."""
+
+    def test_torn_final_line_never_bricks_or_merges(self, memory, tmp_path):
+        for subject in ("Gomra", "Gamra"):
+            memory.enqueue_review(make_item(subject), actor="engine")
+        out = tmp_path / "night"
+        run_overnight(memory, CAMPAIGN, accepting_teachers(), out_dir=out,
+                      max_items=1, on_progress=lambda *_: None)
+        # Simulate a crash mid-append: torn fragment, no trailing newline.
+        with open(out / "results.jsonl", "a", encoding="utf-8") as f:
+            f.write('{"decision": "bank_acc')
+        messages = []
+        report = run_overnight(memory, CAMPAIGN, accepting_teachers(),
+                               out_dir=out, on_progress=messages.append)
+        results, corrupt = read_results(out / "results.jsonl")
+        assert corrupt == 1                 # torn line skipped, not fatal
+        assert len(results) == 2            # both real verdicts intact
+        assert report.corrupt_lines == 1
+        assert any("torn" in m for m in messages)
+        assert len(read_records(out / "banked_records.jsonl")) == 2
+
+    def test_resolved_items_retire_from_queue_and_report(self, memory, tmp_path):
+        from transcripts_ai.schemas import ReviewAction
+        item = make_item("Xelzor")
+        memory.enqueue_review(item, actor="engine")
+        teachers, _ = discover_teachers(
+            {"TEACHERS": "fake:accept:Xelzor,fake:reject"})
+        out = tmp_path / "night"
+        first = run_overnight(memory, CAMPAIGN, teachers, out_dir=out,
+                              on_progress=lambda *_: None)
+        assert first.queued == 1
+        memory.resolve_review(CAMPAIGN, item.item_id,
+                              action=ReviewAction.NOT_ENTITY,
+                              actor="human:harry")
+        second = run_overnight(memory, CAMPAIGN, teachers, out_dir=out,
+                               on_progress=lambda *_: None)
+        assert second.queued == 0           # answered items stay answered
+        assert (out / "morning_queue.jsonl").read_text() == ""
+        report_md = (out / "morning_report.md").read_text(encoding="utf-8")
+        assert "Your morning questions" not in report_md
+
+    def test_out_dir_lock_rejects_concurrent_run(self, memory, tmp_path):
+        from transcripts_ai.lab.overnight import OutDirLock
+        out = tmp_path / "night"
+        out.mkdir()
+        with OutDirLock(out):
+            with pytest.raises(RuntimeError, match="owns this out-dir"):
+                run_overnight(memory, CAMPAIGN, accepting_teachers(),
+                              out_dir=out, on_progress=lambda *_: None)
+        # lock released: a later run proceeds
+        memory.enqueue_review(make_item("Gomra"), actor="engine")
+        report = run_overnight(memory, CAMPAIGN, accepting_teachers(),
+                               out_dir=out, on_progress=lambda *_: None)
+        assert report.processed_tonight == 1
+        assert not (out / "overnight.lock").exists()
+
+    def test_futile_min_votes_refused_before_spending(self, memory, tmp_path):
+        memory.enqueue_review(make_item("Gomra"), actor="engine")
+        teachers, _ = discover_teachers({"TEACHERS": "fake:accept:Ghomra"})
+        with pytest.raises(ValueError, match="nothing could ever bank"):
+            run_overnight(memory, CAMPAIGN, teachers,
+                          out_dir=tmp_path / "n", min_votes=2,
+                          on_progress=lambda *_: None)
+        assert teachers[0].provider.calls == 0     # zero spend
+
+    def test_spend_report_covers_whole_night_across_resumes(self, memory,
+                                                            tmp_path):
+        for subject in ("Gomra", "Gamra"):
+            memory.enqueue_review(make_item(subject), actor="engine")
+        out = tmp_path / "night"
+        run_overnight(memory, CAMPAIGN, accepting_teachers(), out_dir=out,
+                      max_items=1, on_progress=lambda *_: None)
+        report = run_overnight(memory, CAMPAIGN, accepting_teachers(),
+                               out_dir=out, on_progress=lambda *_: None)
+        usage = report.usage_by_teacher["fake-accept"]
+        assert usage["completion_tokens"] > 0
+        # two items' worth of prompt tokens, not just the resumed run's one
+        first_run_only = run_overnight.__doc__  # noqa: F841 (readability)
+        assert usage["prompt_tokens"] >= 2 * 5
+
+    def test_multiline_abstain_reason_is_flattened_in_report(self, memory,
+                                                             tmp_path):
+        from transcripts_ai.lab.overnight import render_morning_report
+        from transcripts_ai.lab.overnight import OvernightReport
+        result = PanelResult(
+            item=make_item("Xelzor"),
+            opinions=[Opinion(teacher="gpt", verdict="abstain",
+                              reason="ProviderError: HTTP 500\n"
+                                     '{"error":\n "boom"}' + "x" * 300)],
+            decision="queue", gate_note="not enough agreement to bank")
+        report = OvernightReport(
+            campaign_id=CAMPAIGN, processed_tonight=1, skipped_resumed=0,
+            remaining_pending=0, bank_accept=0, bank_reject=0, queued=1,
+            abstains_by_teacher={}, usage_by_teacher={})
+        text = render_morning_report(report, [result], [])
+        queue_lines = [l for l in text.splitlines() if "ProviderError" in l]
+        assert len(queue_lines) == 1
+        assert "\n" not in queue_lines[0] and len(queue_lines[0]) < 220
 
 
 class TestOvernightCli:

@@ -270,6 +270,11 @@ def cmd_overnight(args: argparse.Namespace) -> int:
     if not teachers:
         print("no teachers are ready; set TEACHERS (see the `teachers` command)")
         return 1
+    if len(teachers) < args.min_votes:
+        print(f"{len(teachers)} teacher(s) but --min-votes {args.min_votes}: "
+              "nothing could ever bank. Add teachers or lower --min-votes "
+              "before spending a night.")
+        return 1
     print("overnight loop: " + ", ".join(f"{t.name} ({t.model})" for t in teachers))
 
     memory = CampaignMemory(args.db)

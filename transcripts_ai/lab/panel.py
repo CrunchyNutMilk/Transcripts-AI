@@ -283,11 +283,17 @@ def decide(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
         return PanelResult(item=item, opinions=opinions, decision="queue",
                            gate_note="not enough agreement to bank")
     if all(o.verdict == "accept" for o in votes):
-        choices = {o.choice.casefold().strip() for o in votes}
-        if len(choices) != 1:
-            return PanelResult(item=item, opinions=opinions, decision="queue",
-                               gate_note="accepts disagree on the choice")
-        agreed = votes[0].choice.strip()
+        if item.item_type in NAME_ITEM_TYPES:
+            choices = {o.choice.casefold().strip() for o in votes}
+            if len(choices) != 1:
+                return PanelResult(item=item, opinions=opinions,
+                                   decision="queue",
+                                   gate_note="accepts disagree on the choice")
+            agreed = votes[0].choice.strip()
+        else:
+            # fact/summary accepts agree by verdict alone — any 'choice'
+            # text a teacher volunteered is commentary, not a name.
+            agreed = ""
         engine_uncertain = next(
             (o for o in opinions
              if o.teacher == ENGINE_NAME and o.verdict == "uncertain"), None)

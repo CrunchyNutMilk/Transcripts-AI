@@ -212,6 +212,17 @@ class TestDecide:
         assert result.decision == "bank_accept"
         assert result.agreed_choice == ""
 
+    def test_fact_accepts_ignore_volunteered_choice_text(self, memory):
+        # Teachers sometimes put commentary in 'choice' on fact items;
+        # verdict agreement is what banks, not matching commentary.
+        item = make_item("The party sealed the tunnel.", item_type="fact",
+                         evidence=["Jinx: seal it up"])
+        opinions = self._opinions(("accept", "supported by quote 1"),
+                                  ("accept", ""))
+        result = decide(memory, CAMPAIGN, item, opinions)
+        assert result.decision == "bank_accept"
+        assert result.agreed_choice == ""
+
 
 class TestEngineOnStatementItems:
     def test_engine_abstains_on_fact_items(self, memory):

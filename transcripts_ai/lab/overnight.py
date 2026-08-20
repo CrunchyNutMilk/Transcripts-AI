@@ -55,6 +55,7 @@ DEFAULT_MAX_ITEMS = 100        # per night; the hard spend cap on panel items
 class OvernightState:
     campaign_id: str
     processed: list[str] = field(default_factory=list)
+    usage: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, out_dir: Path, campaign_id: str) -> "OvernightState":
@@ -68,15 +69,59 @@ class OvernightState:
                 f"not {campaign_id!r}; use a separate --out-dir per campaign"
             )
         return cls(campaign_id=campaign_id,
-                   processed=list(data.get("processed", [])))
+                   processed=list(data.get("processed", [])),
+                   usage={k: dict(v) for k, v in data.get("usage", {}).items()})
 
     def save(self, out_dir: Path) -> None:
         path = out_dir / "state.json"
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(
-            {"campaign_id": self.campaign_id, "processed": self.processed},
+            {"campaign_id": self.campaign_id, "processed": self.processed,
+             "usage": self.usage},
             indent=0, sort_keys=True), encoding="utf-8")
         tmp.replace(path)      # atomic: a crash never truncates the state
+
+    def merge_usage(self, teachers: list[Teacher]) -> None:
+        """Fold this run's spend into the whole-night totals."""
+        for teacher in teachers:
+            if not teacher.usage_totals:
+                continue
+            bucket = self.usage.setdefault(teacher.name, {})
+            for key, value in teacher.usage_totals.items():
+                bucket[key] = bucket.get(key, 0) + value
+
+
+class OutDirLock:
+    """One overnight run per out-dir. A wedged-looking run that gets
+    'resumed' in a second terminal would double-pay every item and
+    interleave torn lines; O_EXCL makes that a clear error instead."""
+
+    def __init__(self, out_dir: Path):
+        self.path = out_dir / "overnight.lock"
+        self._fd: int | None = None
+
+    def __enter__(self) -> "OutDirLock":
+        import os
+        try:
+            self._fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(self._fd, str(os.getpid()).encode())
+        except FileExistsError:
+            owner = ""
+            try:
+                owner = self.path.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+            raise RuntimeError(
+                f"another overnight run owns this out-dir (lock "
+                f"{self.path}, pid {owner or '?'}); if that run is dead, "
+                f"delete the lock file and retry") from None
+        return self
+
+    def __exit__(self, *exc) -> None:
+        import os
+        if self._fd is not None:
+            os.close(self._fd)
+        self.path.unlink(missing_ok=True)
 
 
 def result_to_json(result: PanelResult) -> str:
@@ -111,16 +156,40 @@ def result_from_json(raw: str) -> PanelResult:
     )
 
 
-def read_results(path: Path) -> list[PanelResult]:
+def read_results(path: Path) -> tuple[list[PanelResult], int]:
+    """(results, corrupt line count). Torn lines — a crash or power loss
+    mid-append — are skipped, never fatal: the torn item was never marked
+    processed, so a resume re-asks it. That is the promised at-most-one
+    re-pay, not a bricked out-dir."""
     if not path.exists():
-        return []
-    results = []
+        return [], 0
+    results: list[PanelResult] = []
+    corrupt = 0
     with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 results.append(result_from_json(line))
-    return results
+            except (json.JSONDecodeError, KeyError, TypeError):
+                corrupt += 1
+    return results, corrupt
+
+
+def _append_result(path: Path, result: PanelResult) -> None:
+    """Append one verdict, healing a torn tail first: if the file does not
+    end with a newline (crash mid-append), write one so the new verdict
+    can never merge into the torn fragment."""
+    needs_newline = False
+    if path.exists() and path.stat().st_size:
+        with open(path, "rb") as f:
+            f.seek(-1, 2)
+            needs_newline = f.read(1) != b"\n"
+    with open(path, "a", encoding="utf-8") as f:
+        if needs_newline:
+            f.write("\n")
+        f.write(result_to_json(result) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -133,13 +202,14 @@ class OvernightReport:
     processed_tonight: int
     skipped_resumed: int
     remaining_pending: int
-    bank_accept: int
+    bank_accept: int              # whole night, live pending items only
     bank_reject: int
-    queued: int
+    queued: int                   # still awaiting the human RIGHT NOW
     abstains_by_teacher: dict[str, int]
-    usage_by_teacher: dict[str, dict[str, int]]
+    usage_by_teacher: dict[str, dict[str, int]]   # whole night, all runs
     scorecard_line: str = ""
     out_dir: str = ""
+    corrupt_lines: int = 0
 
 
 def run_overnight(
@@ -156,12 +226,40 @@ def run_overnight(
     answerer_name: str = "memory-baseline",
     on_progress=print,
 ) -> OvernightReport:
+    if len(teachers) < min_votes:
+        raise ValueError(
+            f"{len(teachers)} teacher(s) configured but min_votes={min_votes}:"
+            " nothing could ever bank — add teachers or lower --min-votes"
+            " before spending a night")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    with OutDirLock(out):
+        return _run_overnight_locked(
+            memory, campaign_id, teachers, out,
+            session_id=session_id, max_items=max_items, min_votes=min_votes,
+            bank_path=bank_path, answerer=answerer,
+            answerer_name=answerer_name, on_progress=on_progress)
+
+
+def _run_overnight_locked(
+    memory: CampaignMemory,
+    campaign_id: str,
+    teachers: list[Teacher],
+    out: Path,
+    *,
+    session_id: str | None,
+    max_items: int,
+    min_votes: int,
+    bank_path: str | None,
+    answerer,
+    answerer_name: str,
+    on_progress,
+) -> OvernightReport:
     state = OvernightState.load(out, campaign_id)
     results_path = out / "results.jsonl"
 
     pending = memory.pending_reviews(campaign_id, session_id=session_id)
+    pending_ids = {i.item_id for i in pending}
     done = set(state.processed)
     todo = [i for i in pending if i.item_id not in done]
     skipped = len(pending) - len(todo)
@@ -177,28 +275,42 @@ def run_overnight(
                             min_votes=min_votes)
         # Append the verdict, THEN mark processed — a crash between the two
         # re-asks one item; the reverse order would silently drop one.
-        with open(results_path, "a", encoding="utf-8") as f:
-            f.write(result_to_json(result) + "\n")
+        _append_result(results_path, result)
         state.processed.append(item.item_id)
+        state.merge_usage(teachers)
+        for teacher in teachers:
+            teacher.usage_totals = {}      # merged; don't double-count
         state.save(out)
         on_progress(f"[{index}/{len(tonight)}] {result.decision:12s} "
                     f"{item.subject[:48]!r}")
 
     # Outputs regenerate from the FULL results file, so a resumed night's
-    # banked/queue files always cover every item asked, not just tonight's.
-    results = read_results(results_path)
+    # banked/queue files cover every item asked — but queue rows for items
+    # a human has since resolved are retired, not re-served every morning.
+    results, corrupt = read_results(results_path)
+    if corrupt:
+        on_progress(f"WARNING: skipped {corrupt} torn line(s) in "
+                    f"{results_path.name} (crash mid-write); the affected "
+                    "item(s) will be re-asked")
     seen_ids: set[str] = set()
     unique_results = []
     for result in results:
         if result.item.item_id not in seen_ids:
             seen_ids.add(result.item.item_id)
             unique_results.append(result)
+    live_results = [r for r in unique_results
+                    if r.banked or r.item.item_id in pending_ids]
     banked = records_from_panel(unique_results)
-    queued = queue_from_panel(unique_results)
+    queued = queue_from_panel(live_results)
     write_records(out / "banked_records.jsonl", banked)
     with open(out / "morning_queue.jsonl", "w", encoding="utf-8") as f:
         for row in queued:
             f.write(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n")
+
+    state.merge_usage(teachers)     # any spend since the last per-item save
+    for teacher in teachers:
+        teacher.usage_totals = {}
+    state.save(out)
 
     abstains: dict[str, int] = {}
     for result in unique_results:
@@ -230,13 +342,13 @@ def run_overnight(
         bank_reject=sum(r.decision == "bank_reject" for r in unique_results),
         queued=len(queued),
         abstains_by_teacher=abstains,
-        usage_by_teacher={t.name: dict(t.usage_totals)
-                          for t in teachers if t.usage_totals},
+        usage_by_teacher={k: dict(v) for k, v in state.usage.items()},
         scorecard_line=scorecard_line,
         out_dir=str(out),
+        corrupt_lines=corrupt,
     )
     (out / "morning_report.md").write_text(
-        render_morning_report(report, unique_results, teachers),
+        render_morning_report(report, live_results, teachers),
         encoding="utf-8")
     return report
 
@@ -257,13 +369,18 @@ def render_morning_report(report: OvernightReport,
         + (", ".join(f"{t.name} ({t.model})" for t in teachers) or "none")
         + "_",
         "",
-        f"- Items asked tonight: **{report.processed_tonight}**"
-        + (f" (+{report.skipped_resumed} already done, resumed)"
-           if report.skipped_resumed else ""),
-        f"- Banked automatically: **{report.bank_accept} accepted**, "
-        f"**{report.bank_reject} rejected** (hard negatives)",
-        f"- Waiting for you: **{report.queued}** (pre-answered below)",
+        f"- Items asked this run: **{report.processed_tonight}**"
+        + (f" (+{report.skipped_resumed} done in earlier runs of this "
+           "out-dir)" if report.skipped_resumed else ""),
+        f"- Banked across the whole out-dir: **{report.bank_accept} "
+        f"accepted**, **{report.bank_reject} rejected** (hard negatives)",
+        f"- Waiting for you right now: **{report.queued}** (pre-answered "
+        "below; items you already resolved are retired)",
     ]
+    if report.corrupt_lines:
+        lines.append(f"- ⚠ {report.corrupt_lines} torn line(s) in "
+                     "results.jsonl were skipped (crash mid-write); the "
+                     "affected items will be re-asked next run")
     if report.remaining_pending:
         lines.append(f"- Still pending beyond tonight's cap: "
                      f"{report.remaining_pending}")
@@ -291,8 +408,12 @@ def render_morning_report(report: OvernightReport,
             for opinion in result.opinions:
                 verdict = opinion.verdict.upper()
                 choice = f" → {opinion.choice}" if opinion.choice else ""
+                # Provider-error abstain reasons can carry newlines and
+                # JSON bodies; one flattened, bounded line keeps the
+                # report readable.
+                reason = " ".join(opinion.reason.split())[:160]
                 lines.append(f"- **{opinion.teacher}**: {verdict}{choice}"
-                             + (f" — {opinion.reason}" if opinion.reason else ""))
+                             + (f" — {reason}" if reason else ""))
             lines.append("")
         if len(queued) > max_queue_preview:
             lines.append(f"…and {len(queued) - max_queue_preview} more in "
