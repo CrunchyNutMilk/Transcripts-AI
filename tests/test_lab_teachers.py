@@ -48,6 +48,19 @@ class TestAnthropicShape:
         with pytest.raises(ProviderError, match="malformed anthropic"):
             parse_anthropic_response({"content": "not-a-list"}, fallback_model="m")
 
+    def test_no_temperature_sent(self):
+        # Current Claude models reject non-default sampling params.
+        _, _, payload = anthropic_request(
+            base_url="https://api.anthropic.com", api_key="k",
+            model="claude-sonnet-5", system="s", user="u", max_tokens=600,
+        )
+        assert "temperature" not in payload
+
+    def test_truncated_empty_response_is_clear_error(self):
+        body = {"content": [], "stop_reason": "max_tokens"}
+        with pytest.raises(ProviderError, match="truncated at max_tokens"):
+            parse_anthropic_response(body, fallback_model="m")
+
 
 class TestGeminiShape:
     def test_request_shape(self):
@@ -61,7 +74,15 @@ class TestGeminiShape:
         assert "g-key" not in url          # key never rides in the URL
         assert payload["system_instruction"]["parts"] == [{"text": "sys"}]
         assert payload["contents"][0]["parts"] == [{"text": "usr"}]
-        assert payload["generationConfig"]["maxOutputTokens"] == 600
+        # No generationConfig: gemini-2.5 thinking spends against
+        # maxOutputTokens (starving small caps into parts-less candidates),
+        # and non-default temperature is unwanted.
+        assert "generationConfig" not in payload
+
+    def test_max_tokens_candidate_without_parts_is_clear_error(self):
+        body = {"candidates": [{"finishReason": "MAX_TOKENS", "content": {}}]}
+        with pytest.raises(ProviderError, match="finishReason='MAX_TOKENS'"):
+            parse_gemini_response(body, fallback_model="m")
 
     def test_parse_response(self):
         body = {
@@ -121,6 +142,47 @@ class TestHttpAdapters:
         provider = GeminiProvider(model="gemini-2.5-pro", api_key="k",
                                   opener=opener)
         assert provider.complete(system="s", user="u").text == "ok"
+
+    def test_mid_body_connection_reset_becomes_provider_error(self):
+        # A dying server mid-read must degrade to abstention, never crash.
+        class _DyingResponse:
+            def read(self):
+                raise ConnectionResetError("connection reset by peer")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        provider = AnthropicProvider(model="m", api_key="k",
+                                     opener=lambda req, timeout: _DyingResponse())
+        with pytest.raises(ProviderError, match="request failed"):
+            provider.complete(system="s", user="u")
+
+    def test_openai_teacher_speaks_current_dialect(self):
+        # gpt-5-family rejects max_tokens and non-default temperature.
+        import json as _json
+        captured = {}
+
+        def opener(request, timeout):
+            captured.update(_json.loads(request.data))
+            return self._StubResponse(
+                {"choices": [{"message": {"content": "ok"}}]})
+
+        teachers, _ = discover_teachers(
+            {"TEACHERS": "openai:gpt-5-mini", "OPENAI_API_KEY": "k"})
+        teachers[0].provider._opener = opener
+        teachers[0].provider.complete(system="s", user="u", max_tokens=99)
+        assert captured["max_completion_tokens"] == 99
+        assert "max_tokens" not in captured
+        assert "temperature" not in captured
+
+    def test_local_teacher_keeps_classic_dialect(self):
+        teachers, _ = discover_teachers({"TEACHERS": "local:llama3.1"})
+        provider = teachers[0].provider
+        assert provider.token_param == "max_tokens"
+        assert provider.send_temperature
 
 
 class TestScriptedTeacher:

@@ -28,6 +28,7 @@ failures belongs to the overnight loop (a later layer), not here.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -68,7 +69,11 @@ def _post_json(
     except urllib.error.HTTPError as exc:  # pragma: no cover - passthrough detail
         detail = exc.read().decode("utf-8", errors="replace")[:500]
         raise ProviderError(f"HTTP {exc.code} from {provider_name}: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except (OSError, TimeoutError, json.JSONDecodeError,
+            http.client.HTTPException) as exc:
+        # OSError covers URLError AND mid-body drops (connection reset,
+        # incomplete read): a dying server becomes an abstention upstream,
+        # never a crashed panel run.
         raise ProviderError(f"{provider_name} request failed: {exc}") from exc
 
 
@@ -78,16 +83,19 @@ def _post_json(
 
 def anthropic_request(
     *, base_url: str, api_key: str, model: str, system: str, user: str,
-    max_tokens: int, temperature: float,
+    max_tokens: int, temperature: float = 0.0,
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
     """Pure request shaping: (url, headers, payload). Key goes in a header,
-    never the URL, so it cannot leak into logs or history files."""
+    never the URL, so it cannot leak into logs or history files.
+
+    ``temperature`` is deliberately NOT sent: current Claude models reject
+    non-default sampling parameters, and the API default is what we want.
+    """
     url = f"{base_url.rstrip('/')}/v1/messages"
     headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
     payload = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "system": system,
         "messages": [{"role": "user", "content": user}],
     }
@@ -100,6 +108,11 @@ def parse_anthropic_response(body: dict[str, Any], *, fallback_model: str) -> Pr
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     except (KeyError, TypeError, AttributeError) as exc:
         raise ProviderError(f"malformed anthropic payload: {body!r:.300}") from exc
+    if not text and body.get("stop_reason") == "max_tokens":
+        # Surface truncation as what it is — a retry of the identical request
+        # would truncate identically, so make the reason unmistakable.
+        raise ProviderError("anthropic response truncated at max_tokens "
+                            "with no text; raise the teacher's max_tokens")
     usage = body.get("usage") or {}
     return ProviderResponse(
         text=text,
@@ -141,18 +154,21 @@ class AnthropicProvider:
 
 def gemini_request(
     *, base_url: str, api_key: str, model: str, system: str, user: str,
-    max_tokens: int, temperature: float,
+    max_tokens: int, temperature: float = 0.0,
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
-    """Pure request shaping: (url, headers, payload). Key in header only."""
+    """Pure request shaping: (url, headers, payload). Key in header only.
+
+    No ``generationConfig`` is sent: Gemini 2.5 models spend "thinking"
+    tokens against ``maxOutputTokens``, so a small cap starves the actual
+    answer into a parts-less MAX_TOKENS candidate — and non-default
+    ``temperature`` is unwanted anyway. Verdicts are short; the prompt
+    bounds the cost.
+    """
     url = f"{base_url.rstrip('/')}/models/{model}:generateContent"
     headers = {"x-goog-api-key": api_key}
     payload = {
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        },
     }
     return url, headers, payload
 
@@ -162,10 +178,20 @@ def parse_gemini_response(body: dict[str, Any], *, fallback_model: str) -> Provi
     if not candidates:
         feedback = body.get("promptFeedback") or {}
         raise ProviderError(f"gemini returned no candidates: {feedback!r:.300}")
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        raise ProviderError(f"malformed gemini payload: {body!r:.300}")
+    content = candidate.get("content") or {}
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not parts:
+        # SAFETY / MAX_TOKENS candidates legally arrive with no parts.
+        raise ProviderError(
+            "gemini returned no text "
+            f"(finishReason={candidate.get('finishReason')!r})"
+        )
     try:
-        parts = candidates[0]["content"]["parts"]
         text = "".join(p.get("text", "") for p in parts)
-    except (KeyError, IndexError, TypeError) as exc:
+    except (TypeError, AttributeError) as exc:
         raise ProviderError(f"malformed gemini payload: {body!r:.300}") from exc
     usage = body.get("usageMetadata") or {}
     return ProviderResponse(
@@ -240,7 +266,13 @@ class ScriptedTeacherProvider:
             text = json.dumps({"answer": payload})
         else:  # garbage or anything unrecognised
             text = "Hmm, I would have to think about that one."
-        return ProviderResponse(text=text, model=self.model, provider="fake")
+        return ProviderResponse(
+            text=text, model=self.model, provider="fake",
+            # Report plausible usage so cost accounting is exercised by
+            # every test and dry run, not just by paid calls.
+            usage={"prompt_tokens": len(user.split()),
+                   "completion_tokens": len(text.split())},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +309,11 @@ def _build_teacher(provider_kind: str, model: str, env: dict[str, str]) -> ChatP
         return OpenAICompatProvider(
             model=model, api_key=key, provider_name="openai",
             base_url=env.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            # gpt-5-family models reject max_tokens and non-default
+            # temperature on chat/completions; local servers keep the
+            # classic dialect below.
+            token_param="max_completion_tokens",
+            send_temperature=False,
         )
     if provider_kind == "anthropic":
         key = env.get("ANTHROPIC_API_KEY", "")

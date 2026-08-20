@@ -267,6 +267,13 @@ def cmd_gold_score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="transcripts_ai.lab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -319,10 +326,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", required=True)
     p.add_argument("--campaign", required=True)
     p.add_argument("--session", help="only items from this session")
-    p.add_argument("--limit", type=int, default=panel_mod.DEFAULT_ITEM_LIMIT,
-                   help="max items per run (cost guard)")
-    p.add_argument("--min-votes", type=int, default=panel_mod.MIN_VOTES_TO_BANK,
-                   help="non-abstain votes required before anything banks")
+    p.add_argument("--limit", type=_positive_int,
+                   default=panel_mod.DEFAULT_ITEM_LIMIT,
+                   help="max items per run (cost guard, minimum 1)")
+    p.add_argument("--min-votes", type=_positive_int,
+                   default=panel_mod.MIN_VOTES_TO_BANK,
+                   help="teacher votes (excluding the engine) required "
+                        "before anything banks")
     p.add_argument("--teachers", help="override the TEACHERS env spec")
     p.add_argument("--out-queue", required=True,
                    help="JSONL morning queue (items still needing a human)")

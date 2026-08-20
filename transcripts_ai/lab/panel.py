@@ -27,6 +27,7 @@ Safety properties, enforced here and tested:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -38,10 +39,24 @@ from ..schemas import ReviewItem
 from .records import TrainingRecord
 from .teachers import Teacher
 
-MIN_VOTES_TO_BANK = 2          # never bank on a single opinion
+ENGINE_NAME = "engine"
+NAME_ITEM_TYPES = ("spelling", "entity")   # where the resolver's vote means something
+MIN_VOTES_TO_BANK = 2          # TEACHER votes; the engine never counts toward quorum
 DEFAULT_ITEM_LIMIT = 25        # cost guard: explicit --limit to raise
 
 VERDICTS = ("accept", "reject", "uncertain", "abstain")
+
+# Provider error text can echo request credentials (e.g. a 401 body quoting
+# the offending key). Anything persisted to queue/banked files goes through
+# this first.
+_SECRET_RE = re.compile(
+    r"(sk-[A-Za-z0-9_\-]{8,}|AIza[0-9A-Za-z_\-]{10,}|Bearer\s+[A-Za-z0-9._\-]{8,}"
+    r"|x-api-key[\"':\s=]+[A-Za-z0-9._\-]{8,})"
+)
+
+
+def redact_secrets(text: str) -> str:
+    return _SECRET_RE.sub("[redacted]", text)
 
 PANEL_SYSTEM = """\
 You are one voice on a review panel for a Dungeons & Dragons transcript system.
@@ -147,28 +162,35 @@ def build_panel_prompt(item: ReviewItem, known_names: list[str]) -> str:
 def engine_opinion(memory: CampaignMemory, campaign_id: str, item: ReviewItem) -> Opinion:
     """The engine's own vote, from the resolver's confidence bands.
 
+    The resolver judges NAMES, so it only votes on spelling/entity items:
     AUTO_LINK-grade evidence → accept; SUGGEST-grade → uncertain (that is
-    exactly what the band means); anything weaker → reject. Deterministic
-    and free, so it always sits on the panel.
+    exactly what the band means); anything weaker → reject. On fact and
+    summary items its opinion would be a content-free "that sentence is
+    not a name" — so it abstains and leaves those to the teachers.
     """
+    if item.item_type not in NAME_ITEM_TYPES:
+        return Opinion(teacher=ENGINE_NAME, verdict="abstain", model="native",
+                       reason="engine's resolver only judges name items")
     resolution = NameResolver(memory).resolve(campaign_id, item.subject)
     best = resolution.best
     if best is None:
-        return Opinion(teacher="engine", verdict="reject", model="native",
+        return Opinion(teacher=ENGINE_NAME, verdict="reject", model="native",
                        reason="no match in campaign memory")
     if best.band is BandAction.AUTO_LINK:
-        return Opinion(teacher="engine", verdict="accept", choice=best.canonical,
+        return Opinion(teacher=ENGINE_NAME, verdict="accept", choice=best.canonical,
                        model="native", reason=best.explanation or "strong match")
     if best.band is BandAction.SUGGEST:
-        return Opinion(teacher="engine", verdict="uncertain", choice=best.canonical,
+        return Opinion(teacher=ENGINE_NAME, verdict="uncertain", choice=best.canonical,
                        model="native", reason=best.explanation or "plausible match")
-    return Opinion(teacher="engine", verdict="reject", model="native",
+    return Opinion(teacher=ENGINE_NAME, verdict="reject", model="native",
                    reason=f"best match {best.canonical!r} below suggestion band")
 
 
 def teacher_opinion(teacher: Teacher, prompt: str) -> Opinion:
     """One teacher's vote. Errors and unparseable replies become abstentions
-    — a flaky teacher can cost the panel a voice, never the run."""
+    — a flaky teacher can cost the panel a voice, never the run. The broad
+    except is that guarantee: whatever a provider throws, the run survives,
+    and persisted reasons are redacted so error bodies cannot leak keys."""
     try:
         payload, _ = call_role(
             teacher.provider,
@@ -178,9 +200,10 @@ def teacher_opinion(teacher: Teacher, prompt: str) -> Opinion:
             max_tokens=teacher.max_tokens,
             usage_sink=teacher.record_usage,
         )
-    except (ProviderError, ValidationFailed) as exc:
+    except (ProviderError, ValidationFailed, Exception) as exc:  # noqa: B014
         return Opinion(teacher=teacher.name, verdict="abstain",
-                       model=teacher.model, reason=f"{type(exc).__name__}: {exc}"[:200])
+                       model=teacher.model,
+                       reason=redact_secrets(f"{type(exc).__name__}: {exc}")[:200])
     return Opinion(
         teacher=teacher.name,
         verdict=payload["verdict"],
@@ -198,13 +221,16 @@ def evidence_gate(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
                   choice: str) -> tuple[bool, str]:
     """Rules the panel cannot vote its way around.
 
-    An agreed accept only banks if the item carries evidence quotes and
-    the agreed name already exists in campaign memory (as an entity or an
-    approved alias). Teachers agreeing on an invented name is still an
-    invented name.
+    Every banked accept needs evidence quotes. For NAME items the agreed
+    choice must additionally exist in campaign memory already (as an
+    entity or an approved alias) — teachers agreeing on an invented name
+    is still an invented name. Fact/summary items carry statements, not
+    names, so no choice is demanded of them.
     """
     if not item.evidence:
         return False, "item has no evidence quotes"
+    if item.item_type not in NAME_ITEM_TYPES:
+        return True, "statement item with evidence quotes"
     if not choice:
         return False, "accept votes carried no choice"
     if memory.find_entity(campaign_id, choice) is not None:
@@ -230,9 +256,14 @@ class PanelResult:
 
 def decide(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
            opinions: list[Opinion], *, min_votes: int = MIN_VOTES_TO_BANK) -> PanelResult:
+    """Banking rules. The engine's vote can BLOCK a bank (it is a real
+    disagreement signal) but never counts toward the quorum — its reject on
+    an unknown name is near-automatic, and quorum met by it would let a
+    single real teacher bank records alone."""
     votes = [o for o in opinions if o.verdict in ("accept", "reject")]
+    teacher_votes = [o for o in votes if o.teacher != ENGINE_NAME]
     uncertain = [o for o in opinions if o.verdict == "uncertain"]
-    if len(votes) < min_votes or uncertain:
+    if len(teacher_votes) < min_votes or uncertain:
         return PanelResult(item=item, opinions=opinions, decision="queue",
                            gate_note="not enough agreement to bank")
     if all(o.verdict == "accept" for o in votes):
@@ -248,6 +279,11 @@ def decide(memory: CampaignMemory, campaign_id: str, item: ReviewItem,
         return PanelResult(item=item, opinions=opinions, decision="bank_accept",
                            agreed_choice=agreed, gate_note=note)
     if all(o.verdict == "reject" for o in votes):
+        if not item.evidence:
+            # A hard negative without evidence is untraceable junk (e.g. the
+            # pipeline's own failure items) — a human should look instead.
+            return PanelResult(item=item, opinions=opinions, decision="queue",
+                               gate_note="gate: hard negative needs evidence quotes")
         return PanelResult(item=item, opinions=opinions, decision="bank_reject",
                            gate_note="unanimous reject")
     return PanelResult(item=item, opinions=opinions, decision="queue",

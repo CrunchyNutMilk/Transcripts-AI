@@ -161,6 +161,64 @@ class TestDecide:
             ("accept", "Ghomra"), ("abstain", ""), ("abstain", "")))
         assert result.decision == "queue"
 
+    def test_engine_vote_never_counts_toward_quorum(self, memory):
+        # engine-reject + one real teacher must NOT bank a hard negative.
+        opinions = [Opinion(teacher="engine", verdict="reject",
+                            reason="no match in campaign memory"),
+                    Opinion(teacher="llama", verdict="reject")]
+        result = decide(memory, CAMPAIGN, make_item(), opinions)
+        assert result.decision == "queue"
+
+    def test_engine_disagreement_still_blocks_banking(self, memory):
+        opinions = [Opinion(teacher="engine", verdict="reject"),
+                    Opinion(teacher="gpt", verdict="accept", choice="Ghomra"),
+                    Opinion(teacher="claude", verdict="accept", choice="Ghomra")]
+        result = decide(memory, CAMPAIGN, make_item(), opinions)
+        assert result.decision == "queue"       # split panel, engine included
+
+    def test_reject_consensus_without_evidence_queues(self, memory):
+        # Pipeline failure items (evidence=[]) must not bank as junk negatives.
+        opinions = self._opinions(("reject", ""), ("reject", ""))
+        result = decide(memory, CAMPAIGN, make_item(evidence=[]), opinions)
+        assert result.decision == "queue"
+        assert "evidence" in result.gate_note
+
+    def test_fact_accept_consensus_banks_on_evidence_alone(self, memory):
+        item = make_item("The party sealed the tunnel before resting.",
+                         item_type="fact",
+                         evidence=["Jinx: let's just try and seal up whatever "
+                                   "entries are leading here and take a long rest"])
+        opinions = self._opinions(("accept", ""), ("accept", ""))
+        result = decide(memory, CAMPAIGN, item, opinions)
+        assert result.decision == "bank_accept"
+        assert result.agreed_choice == ""
+
+
+class TestEngineOnStatementItems:
+    def test_engine_abstains_on_fact_items(self, memory):
+        # A statement mentioning a known name must not become an engine
+        # 'uncertain' (or content-free reject) via name resolution.
+        item = make_item("Ghomra guards the eastern bridge at night",
+                         item_type="fact")
+        opinion = engine_opinion(memory, CAMPAIGN, item)
+        assert opinion.verdict == "abstain"
+
+    def test_engine_abstains_on_summary_claims(self, memory):
+        item = make_item("summary generation failed validation",
+                         item_type="summary_claim", evidence=[])
+        assert engine_opinion(memory, CAMPAIGN, item).verdict == "abstain"
+
+
+class TestRedaction:
+    def test_secret_material_never_reaches_reasons(self):
+        from transcripts_ai.lab.panel import redact_secrets
+        text = ('HTTP 401 from openai: {"error": "Incorrect API key provided: '
+                'sk-proj-Ab12Cd34Ef56Gh78"}')
+        cleaned = redact_secrets(text)
+        assert "sk-proj" not in cleaned and "[redacted]" in cleaned
+        assert redact_secrets("Bearer abc123def456ghi.jkl") == "[redacted]"
+        assert redact_secrets("plain reason text") == "plain reason text"
+
 
 class TestPanelOutputs:
     def _results(self, memory):
@@ -316,6 +374,88 @@ class TestPanelCli:
                          "--answerer", "teacher:fake-answer"]) == 0
         out = capsys.readouterr().out
         assert "teacher:fake-answer" in out and "1/1" in out
+
+    def test_panel_banks_hard_negative_end_to_end(self, tmp_path, monkeypatch,
+                                                  capsys):
+        db = tmp_path / "memory.sqlite"
+        memory = CampaignMemory(db)
+        memory.enqueue_review(make_item("gonf", item_type="entity"),
+                              actor="engine")
+        memory.close()
+        monkeypatch.setenv("TEACHERS", "fake:reject,fake:reject")
+        queue = tmp_path / "queue.jsonl"
+        banked = tmp_path / "banked.jsonl"
+        assert lab_main(["panel", "--db", str(db), "--campaign", CAMPAIGN,
+                         "--out-queue", str(queue),
+                         "--out-records", str(banked)]) == 0
+        out = capsys.readouterr().out
+        assert "1 banked reject" in out
+        assert "usage fake-reject:" in out       # spend accounting visible
+        records = read_records(banked)           # fails closed if invalid
+        assert len(records) == 1
+        record = records[0]
+        assert not record.accepted and record.decision == "reject"
+        assert record.choice is None
+        assert record.evidence_quote
+        assert record.actor.startswith("panel:")
+
+    def test_panel_limit_and_session_filter(self, tmp_path, monkeypatch, capsys):
+        db = tmp_path / "memory.sqlite"
+        memory = CampaignMemory(db)
+        for index in range(3):
+            memory.enqueue_review(make_item(f"name{index}", session="s1"),
+                                  actor="engine")
+        memory.enqueue_review(make_item("other", session="s2"), actor="engine")
+        memory.close()
+        monkeypatch.setenv("TEACHERS", "fake:uncertain")
+        queue, banked = tmp_path / "q.jsonl", tmp_path / "b.jsonl"
+        assert lab_main(["panel", "--db", str(db), "--campaign", CAMPAIGN,
+                         "--limit", "2", "--session", "s1",
+                         "--out-queue", str(queue),
+                         "--out-records", str(banked)]) == 0
+        out = capsys.readouterr().out
+        assert "limiting to first 2 of 3" in out   # s2's item filtered out
+        rows = [json.loads(l) for l in queue.read_text().splitlines()]
+        assert len(rows) == 2
+        assert all(r["session_id"] == "s1" for r in rows)
+
+    def test_panel_limit_zero_rejected(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
+            lab_main(["panel", "--db", "x", "--campaign", CAMPAIGN,
+                      "--limit", "0", "--out-queue", "q", "--out-records", "b"])
+
+    def test_usage_accounting_accumulates(self):
+        teachers, _ = discover_teachers({"TEACHERS": "fake:uncertain"})
+        teacher = teachers[0]
+        for _ in range(3):
+            teacher_opinion(teacher, "some panel prompt")
+        assert teacher.usage_totals["prompt_tokens"] >= 9   # 3 calls summed
+        from transcripts_ai.lab.panel import summarize
+        report = summarize([], [teacher])
+        assert report.usage_by_teacher["fake-uncertain"] == teacher.usage_totals
+
+    def test_score_default_answerer_name_is_pinned(self, tmp_path, monkeypatch,
+                                                   capsys):
+        # Months of history rows say "memory-baseline"; a rename breaks trends.
+        db = tmp_path / "memory.sqlite"
+        self._seed_db(db)
+        bank = tmp_path / "bank.jsonl"
+        history = tmp_path / "history.jsonl"
+        write_bank(bank, [Question(
+            question_id="q1", campaign_id=CAMPAIGN, qtype="alias",
+            question='Which known name does "Gomra" refer to?',
+            expected=["Ghomra"])])
+        assert lab_main(["score", "--db", str(db), "--campaign", CAMPAIGN,
+                         "--bank", str(bank), "--history", str(history)]) == 0
+        entry = json.loads(history.read_text().splitlines()[0])
+        assert entry["answerer"] == "memory-baseline"
+
+    def test_empty_teacher_answer_is_a_refusal(self, memory):
+        teachers, _ = discover_teachers({"TEACHERS": "fake:answer:"})
+        answer = teacher_answerer(memory, CAMPAIGN, teachers[0])(
+            Question(question_id="q", campaign_id=CAMPAIGN, qtype="trick",
+                     question="When did Boblin die?", expected=[]))
+        assert answer == NOT_IN_RECORD
 
     def test_score_unknown_teacher_fails_loudly(self, tmp_path, monkeypatch):
         db = tmp_path / "memory.sqlite"

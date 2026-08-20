@@ -13,6 +13,7 @@ never crash the pipeline or produce unvalidated data.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -64,6 +65,15 @@ class ChatProvider(Protocol):
 # ---------------------------------------------------------------------------
 
 class OpenAICompatProvider:
+    """OpenAI-compatible chat completions.
+
+    ``token_param``/``send_temperature`` exist because api.openai.com and the
+    local servers have drifted apart: current gpt-5-family models reject
+    ``max_tokens`` (they want ``max_completion_tokens``) and reject non-default
+    ``temperature``, while Ollama/llama.cpp/LM Studio still speak the classic
+    dialect. Defaults preserve the classic dialect for local servers.
+    """
+
     def __init__(
         self,
         *,
@@ -73,6 +83,8 @@ class OpenAICompatProvider:
         provider_name: str = "openai",
         timeout: float = 120.0,
         opener: Callable[..., Any] | None = None,
+        token_param: str = "max_tokens",
+        send_temperature: bool = True,
     ):
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -80,6 +92,8 @@ class OpenAICompatProvider:
         self.provider_name = provider_name
         self.timeout = timeout
         self._opener = opener or urllib.request.urlopen
+        self.token_param = token_param
+        self.send_temperature = send_temperature
 
     def complete(
         self,
@@ -95,9 +109,10 @@ class OpenAICompatProvider:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            self.token_param: max_tokens,
         }
+        if self.send_temperature:
+            payload["temperature"] = temperature
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -113,7 +128,11 @@ class OpenAICompatProvider:
         except urllib.error.HTTPError as exc:  # pragma: no cover - passthrough detail
             detail = exc.read().decode("utf-8", errors="replace")[:500]
             raise ProviderError(f"HTTP {exc.code} from {self.provider_name}: {detail}") from exc
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (OSError, TimeoutError, json.JSONDecodeError,
+                http.client.HTTPException) as exc:
+            # OSError covers URLError AND mid-body failures (connection reset,
+            # incomplete read) — a dying server must never escape as anything
+            # but ProviderError.
             raise ProviderError(f"{self.provider_name} request failed: {exc}") from exc
         try:
             text = body["choices"][0]["message"]["content"] or ""
@@ -210,6 +229,8 @@ class RoleRegistry:
                 base_url=self.env.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
                 api_key=self.env.get("OPENAI_API_KEY", ""),
                 provider_name="openai",
+                token_param="max_completion_tokens",
+                send_temperature=False,
             )
         elif config.provider == "local":
             provider = OpenAICompatProvider(
