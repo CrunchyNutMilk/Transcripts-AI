@@ -16,6 +16,14 @@ against a DISPOSABLE evaluation database, never your permanent campaign
 memory: Mapped transcripts are the only allowed input for that (use
 `python -m transcripts_ai process` after the bot maps speakers).
 
+**Craig multitrack zips** (craig-….aac.zip from the Discord recorder) are
+the better input when you have one: every speaker has their own track, so
+the transcript comes out speaker-labelled with no diarization at all.
+Pass --craig with the zip (or its extracted folder) and optionally
+--mapping to turn Discord usernames into character names. Craig's .aac
+tracks decode natively with --backend faster-whisper; for whisper-cpp the
+script converts via ffmpeg when it is on PATH.
+
 Examples:
     python scripts/transcribe_session.py --out session.md part1.mp3 part2.mp3
     python scripts/transcribe_session.py --backend whisper-cpp \
@@ -23,6 +31,9 @@ Examples:
     python scripts/transcribe_session.py --out s.md --process \
         --campaign "Heckuva Side Quest" --session 2026-08-09 \
         --game "Heckuva Side Quest" "*Part*.mp3"
+    python scripts/transcribe_session.py --backend faster-whisper \
+        --craig "craig-abc123.aac.zip" --mapping mapping.json \
+        --initial-prompt-file prompt.txt --out 20260816_craig.md
 """
 from __future__ import annotations
 
@@ -105,9 +116,84 @@ def transcribe_faster_whisper(path: Path, model_name: str,
 _FW_CACHE: dict = {}
 
 
+def _ensure_decodable(path: Path, backend: str, workdir: Path) -> Path:
+    """whisper.cpp servers usually reject AAC/Opus; convert via ffmpeg."""
+    if backend != "whisper-cpp" or path.suffix.lower() in {".wav", ".mp3", ".flac"}:
+        return path
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        print(f"WARNING: {path.name} is {path.suffix} and ffmpeg is not on "
+              "PATH; sending as-is (if the server rejects it, install ffmpeg "
+              "or use --backend faster-whisper)")
+        return path
+    workdir.mkdir(parents=True, exist_ok=True)
+    converted = workdir / (path.stem + ".wav")
+    if not converted.exists():
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
+             "-ar", "16000", "-ac", "1", str(converted)],
+            check=True,
+        )
+    return converted
+
+
+def run_craig(args, initial_prompt: str) -> int:
+    from transcripts_ai import craig
+
+    out = Path(args.out)
+    source = Path(args.craig)
+    if source.is_file():
+        extract_dir = out.with_name(out.stem + "_craig_tracks")
+        print(f"extracting {source.name} -> {extract_dir}")
+        craig.extract_craig_zip(source, extract_dir)
+        source = extract_dir
+    tracks = craig.discover_tracks(source)
+    print(f"{len(tracks)} speaker track(s): "
+          + ", ".join(f"{t.number}-{t.speaker}" for t in tracks))
+
+    per_track: dict[str, list[tuple[float, float, str]]] = {}
+    convert_dir = out.with_name(out.stem + "_wav")
+    for track in tracks:
+        print(f"transcribing track {track.number} ({track.speaker}) ...")
+        audio_path = _ensure_decodable(track.path, args.backend, convert_dir)
+        if args.backend == "whisper-cpp":
+            segments = transcribe_whisper_cpp(audio_path, args.server,
+                                              initial_prompt)
+        else:
+            segments = transcribe_faster_whisper(audio_path, args.fw_model,
+                                                 initial_prompt)
+        per_track.setdefault(track.speaker, []).extend(segments)
+        print(f"  {len(segments)} segments")
+
+    merged = craig.merge_segments(per_track)
+    if args.mapping:
+        with open(args.mapping, encoding="utf-8") as f:
+            mapping_data = json.load(f)
+        speaker_map = craig.speaker_map_from_mapping(mapping_data)
+        merged, unmapped = craig.apply_speaker_map(merged, speaker_map)
+        if unmapped:
+            print("NOT IN MAPPING (kept as Discord usernames): "
+                  + ", ".join(unmapped))
+            print("  add them to the mapping file's players/dm_labels and "
+                  "re-run to get character names")
+    out.write_text(craig.render_transcript(merged), encoding="utf-8")
+    print(f"wrote {out} ({len(merged)} entries, "
+          f"{len(per_track)} speakers)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("audio", nargs="+", help="audio part files, any order")
+    parser.add_argument("audio", nargs="*", help="audio part files, any order")
+    parser.add_argument("--craig",
+                        help="Craig multitrack export: the craig-*.zip itself "
+                             "or its extracted folder. Produces a "
+                             "speaker-labelled transcript (one track per "
+                             "speaker; no diarization needed)")
+    parser.add_argument("--mapping",
+                        help="mapping.json to rename Discord usernames to "
+                             "character names (Craig mode)")
     parser.add_argument("--out", required=True, help="output transcript .md")
     parser.add_argument("--backend", choices=["whisper-cpp", "faster-whisper"],
                         default="whisper-cpp")
@@ -134,6 +220,24 @@ def main() -> int:
                              "`python -m transcripts_ai process` for that.")
     args = parser.parse_args()
 
+    initial_prompt = args.initial_prompt
+    if args.initial_prompt_file:
+        initial_prompt = Path(args.initial_prompt_file).read_text(
+            encoding="utf-8").strip()
+    if initial_prompt:
+        print(f"seeding Whisper with: {initial_prompt[:120]}"
+              + ("..." if len(initial_prompt) > 120 else ""))
+
+    if args.craig:
+        if args.audio:
+            print("--craig replaces the positional audio files; pass one or "
+                  "the other")
+            return 2
+        return run_craig(args, initial_prompt)
+    if not args.audio:
+        print("nothing to do: pass audio files or --craig")
+        return 2
+
     # Expand wildcards ourselves: PowerShell passes quoted globs literally.
     import glob as _glob
     expanded: list[str] = []
@@ -147,14 +251,6 @@ def main() -> int:
 
     parts = sort_parts(expanded)
     print(f"{len(parts)} part(s): {', '.join(p.name for p in parts)}")
-
-    initial_prompt = args.initial_prompt
-    if args.initial_prompt_file:
-        initial_prompt = Path(args.initial_prompt_file).read_text(
-            encoding="utf-8").strip()
-    if initial_prompt:
-        print(f"seeding Whisper with: {initial_prompt[:120]}"
-              + ("..." if len(initial_prompt) > 120 else ""))
 
     lines: list[str] = []
     offset = 0.0

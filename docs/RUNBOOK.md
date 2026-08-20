@@ -191,6 +191,25 @@ python -m transcripts_ai.lab whisper-prompt --db $env:DB `
   --campaign "Heckuva Side Quest" --out $env:WORK\prompt.txt
 
 # 2. Transcribe the audio with the seeded prompt.
+#
+#    2a. BEST: a Craig zip (craig-*.aac.zip from the Discord recorder).
+#    One track per speaker means the transcript comes out with REAL
+#    speaker names — no diarization, and --mapping turns Discord
+#    usernames into character names. Craig .aac decodes natively with
+#    faster-whisper (pip install faster-whisper); with whisper-cpp the
+#    script auto-converts via ffmpeg if it's installed.
+python scripts/transcribe_session.py `
+  --backend faster-whisper --fw-model large-v3 `
+  --craig "path\to\craig-XXXX.aac.zip" `
+  --mapping C:\Users\neill\Documents\engine\mapping.json `
+  --initial-prompt-file $env:WORK\prompt.txt `
+  --out $env:WORK\machine.md
+#    If it prints "NOT IN MAPPING", add those Discord usernames to
+#    mapping.json (players/dm_labels) and re-run — it's fast the second
+#    time only if you keep the extracted _craig_tracks folder.
+#
+#    2b. Or: a single mixed recording in sequential parts (speakers come
+#    out as "Unknown"):
 python scripts/transcribe_session.py `
   --backend whisper-cpp --server http://127.0.0.1:8178 `
   --initial-prompt-file $env:WORK\prompt.txt `
