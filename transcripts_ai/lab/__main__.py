@@ -15,6 +15,12 @@ Layer 2a (teacher panel; needs TEACHERS env or --teachers):
     python -m transcripts_ai.lab panel          --db <db> --campaign <c> \
         --out-queue queue.jsonl --out-records banked.jsonl [--limit 25] [--dry-run]
 
+Gold transcripts (hand-corrected sessions as measurement + labels):
+
+    python -m transcripts_ai.lab whisper-prompt --db <db> --campaign <c> [--out prompt.txt]
+    python -m transcripts_ai.lab gold-score     --gold perfect.md --hyp machine.md \
+        [--db <db> --campaign <c>] [--session <s>] [--out-records r.jsonl] [--report gold.md]
+
 Nothing in the lab writes to campaign memory, transcripts, or the vault.
 The panel reads pending review items and writes JSONL files only; review
 items stay unresolved until a human resolves them.
@@ -23,8 +29,10 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 from ..memory import CampaignMemory
+from . import gold as gold_mod
 from . import panel as panel_mod
 from . import records as records_mod
 from . import scorecard as scorecard_mod
@@ -202,6 +210,63 @@ def cmd_panel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_whisper_prompt(args: argparse.Namespace) -> int:
+    memory = CampaignMemory(args.db)
+    try:
+        prompt = gold_mod.whisper_prompt(memory, args.campaign,
+                                         max_chars=args.max_chars)
+    finally:
+        memory.close()
+    if args.out:
+        Path(args.out).write_text(prompt + "\n", encoding="utf-8")
+        print(f"wrote {args.out} ({len(prompt)} chars)")
+    else:
+        print(prompt)
+    return 0
+
+
+def cmd_gold_score(args: argparse.Namespace) -> int:
+    gold_text = Path(args.gold).read_text(encoding="utf-8")
+    hyp_text = Path(args.hyp).read_text(encoding="utf-8")
+
+    names = None
+    if args.db and args.campaign:
+        memory = CampaignMemory(args.db)
+        try:
+            names = gold_mod.known_names(memory, args.campaign)
+        finally:
+            memory.close()
+    elif args.db or args.campaign:
+        print("--db and --campaign go together (they enable name accuracy)")
+        return 2
+
+    report = gold_mod.compare_transcripts(hyp_text, gold_text, names=names)
+    print(f"gold words: {report.gold_words}   WER: {report.wer:.1%}   "
+          f"(sub {report.substitutions} / drop {report.deletions} / "
+          f"invent {report.insertions})")
+    if names is not None:
+        print(f"known-name accuracy: {report.name_accuracy:.1%} "
+              f"({report.name_hits}/{report.name_total})")
+        for miss in report.name_misses[:10]:
+            print(f'  missed {miss.name!r}: heard "{miss.heard or "(dropped)"}" '
+                  f"(gold line {miss.gold_line})")
+
+    if args.out_records:
+        if not args.campaign or not args.session:
+            print("--out-records needs --campaign and --session for provenance")
+            return 2
+        rows = gold_mod.records_from_gold(report, campaign_id=args.campaign,
+                                          session_id=args.session)
+        count = records_mod.write_records(args.out_records, rows)
+        print(f"mined {count} correction record(s) -> {args.out_records}")
+    if args.report:
+        Path(args.report).write_text(
+            gold_mod.render_markdown(report, session_id=args.session or ""),
+            encoding="utf-8")
+        print(f"report written to {args.report}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="transcripts_ai.lab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -266,6 +331,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true",
                    help="show teachers + first prompt; make no API calls")
     p.set_defaults(func=cmd_panel)
+
+    p = sub.add_parser("whisper-prompt",
+                       help="build a Whisper initial_prompt from campaign names")
+    p.add_argument("--db", required=True)
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--max-chars", type=int, default=gold_mod.PROMPT_MAX_CHARS)
+    p.add_argument("--out", help="write to a file instead of stdout")
+    p.set_defaults(func=cmd_whisper_prompt)
+
+    p = sub.add_parser("gold-score",
+                       help="score a machine transcript against a corrected one")
+    p.add_argument("--gold", required=True, help="the hand-corrected transcript")
+    p.add_argument("--hyp", required=True, help="the machine transcript")
+    p.add_argument("--db", help="campaign db (with --campaign: name accuracy)")
+    p.add_argument("--campaign")
+    p.add_argument("--session", help="session id for mined records/report")
+    p.add_argument("--out-records",
+                   help="JSONL of mined heard->truth corrections")
+    p.add_argument("--report", help="write a Markdown report here")
+    p.set_defaults(func=cmd_gold_score)
 
     args = parser.parse_args(argv)
     return args.func(args)

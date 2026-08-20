@@ -53,12 +53,15 @@ def sort_parts(paths: list[str]) -> list[Path]:
     return [Path(p) for p in sorted(paths, key=key)]
 
 
-def transcribe_whisper_cpp(path: Path, server: str) -> list[tuple[float, float, str]]:
+def transcribe_whisper_cpp(path: Path, server: str,
+                           initial_prompt: str = "") -> list[tuple[float, float, str]]:
     """POST one audio file to a running whisper.cpp server /inference."""
     boundary = "----transcripts-ai"
     body = b""
     data = path.read_bytes()
     fields = {"response_format": "verbose_json", "temperature": "0.0"}
+    if initial_prompt:
+        fields["prompt"] = initial_prompt
     for name, value in fields.items():
         body += (f"--{boundary}\r\nContent-Disposition: form-data; "
                  f'name="{name}"\r\n\r\n{value}\r\n').encode()
@@ -81,7 +84,11 @@ def transcribe_whisper_cpp(path: Path, server: str) -> list[tuple[float, float, 
     return segments
 
 
-def transcribe_faster_whisper(path: Path, model_name: str) -> list[tuple[float, float, str]]:
+DEFAULT_PROMPT = "Tabletop D&D session with dice rolls and fantasy names."
+
+
+def transcribe_faster_whisper(path: Path, model_name: str,
+                              initial_prompt: str = "") -> list[tuple[float, float, str]]:
     from faster_whisper import WhisperModel  # lazy: optional dependency
 
     model = _FW_CACHE.setdefault(
@@ -90,7 +97,7 @@ def transcribe_faster_whisper(path: Path, model_name: str) -> list[tuple[float, 
     segments, _info = model.transcribe(
         str(path), language="en", vad_filter=True,
         condition_on_previous_text=False,
-        initial_prompt="Tabletop D&D session with dice rolls and fantasy names.",
+        initial_prompt=initial_prompt or DEFAULT_PROMPT,
     )
     return [(s.start, s.end, s.text.strip()) for s in segments]
 
@@ -107,6 +114,11 @@ def main() -> int:
     parser.add_argument("--server", default="http://127.0.0.1:8178",
                         help="whisper.cpp server base URL")
     parser.add_argument("--fw-model", default="base.en")
+    parser.add_argument("--initial-prompt", default="",
+                        help="seed Whisper with campaign names (generate one "
+                             "with: python -m transcripts_ai.lab whisper-prompt)")
+    parser.add_argument("--initial-prompt-file",
+                        help="read --initial-prompt from a file")
     parser.add_argument("--process", action="store_true",
                         help="run the engine's native pipeline afterwards "
                              "(EVALUATION ONLY: writes to a disposable database)")
@@ -136,14 +148,23 @@ def main() -> int:
     parts = sort_parts(expanded)
     print(f"{len(parts)} part(s): {', '.join(p.name for p in parts)}")
 
+    initial_prompt = args.initial_prompt
+    if args.initial_prompt_file:
+        initial_prompt = Path(args.initial_prompt_file).read_text(
+            encoding="utf-8").strip()
+    if initial_prompt:
+        print(f"seeding Whisper with: {initial_prompt[:120]}"
+              + ("..." if len(initial_prompt) > 120 else ""))
+
     lines: list[str] = []
     offset = 0.0
     for part in parts:
         print(f"transcribing {part.name} ...")
         if args.backend == "whisper-cpp":
-            segments = transcribe_whisper_cpp(part, args.server)
+            segments = transcribe_whisper_cpp(part, args.server, initial_prompt)
         else:
-            segments = transcribe_faster_whisper(part, args.fw_model)
+            segments = transcribe_faster_whisper(part, args.fw_model,
+                                                 initial_prompt)
         for start, end, text in segments:
             if not text:
                 continue

@@ -174,6 +174,54 @@ Notes:
   `ffmpeg -i in.mp3 -ar 16000 -ac 1 out.wav` — the script accepts WAV too.
   Or use `--backend faster-whisper` after `pip install faster-whisper`.
 
+## 7b. Game-day audio: make a gold transcript that pays for itself
+
+For a session where you have the audio and time to correct the transcript
+once (the "perfect transcript" plan in docs/TRAINING.md). Everything below
+assumes the memory DB from step 3 exists.
+
+```powershell
+$env:DB = "C:\Users\neill\Documents\engine\engine_memory.sqlite"
+$env:WORK = "C:\dev\Transcript_AI_data\gold\2026-08-16"
+mkdir $env:WORK -Force
+
+# 1. Seed Whisper with your campaign's names BEFORE transcribing —
+#    the single cheapest transcription improvement available.
+python -m transcripts_ai.lab whisper-prompt --db $env:DB `
+  --campaign "Heckuva Side Quest" --out $env:WORK\prompt.txt
+
+# 2. Transcribe the audio with the seeded prompt.
+python scripts/transcribe_session.py `
+  --backend whisper-cpp --server http://127.0.0.1:8178 `
+  --initial-prompt-file $env:WORK\prompt.txt `
+  --out $env:WORK\machine.md `
+  "path\to\that game*Part*.mp3"
+
+# 3. Make the gold copy and correct it by hand (this is the human work:
+#    fix names, fix words; don't worry about punctuation).
+copy $env:WORK\machine.md $env:WORK\gold.md
+#    ... edit gold.md in your editor ...
+
+# 4. Score the machine against your corrections and mine every fix:
+python -m transcripts_ai.lab gold-score `
+  --gold $env:WORK\gold.md --hyp $env:WORK\machine.md `
+  --db $env:DB --campaign "Heckuva Side Quest" --session 2026-08-16 `
+  --out-records $env:WORK\corrections.jsonl `
+  --report $env:WORK\gold_report.md
+```
+
+What you get: the session's **WER** and **known-name accuracy** (the
+baseline every later improvement is measured against), a report of exactly
+which names Whisper mangled and what it wrote instead, and
+`corrections.jsonl` — every fix you made, as human-labelled training
+records. Keep `gold.md` forever; it is a frozen-eval candidate.
+
+Two tips that make step 3 fast:
+- Correct names first (search-replace the mangled forms from the report of
+  a previous run); ordinary-word fixes are a bonus, not the point.
+- You do not need to fix everything — an 80%-corrected gold transcript
+  still yields correct WER trends and hundreds of mined corrections.
+
 ## 8. Inspect what came out
 
 ```powershell

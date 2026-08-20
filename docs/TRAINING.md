@@ -160,6 +160,12 @@ errors or returns garbage becomes an abstention, never a crash.
 
 ## Perfect transcripts (gold data)
 
+> **Implemented:** `python -m transcripts_ai.lab whisper-prompt` (seed
+> Whisper with campaign names before transcribing) and
+> `python -m transcripts_ai.lab gold-score` (WER + known-name accuracy +
+> every hand-fix mined as a training record). Step-by-step:
+> docs/RUNBOOK.md §7b.
+
 Five saved games of audio → gold transcripts, built the cheap way:
 
 1. **Start from the reviewed Mapped transcript**, not from scratch — listen
