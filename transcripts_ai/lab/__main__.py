@@ -32,6 +32,7 @@ import os
 from pathlib import Path
 
 from ..memory import CampaignMemory
+from . import compile as compile_mod
 from . import gold as gold_mod
 from . import overnight as overnight_mod
 from . import panel as panel_mod
@@ -208,6 +209,30 @@ def cmd_panel(args: argparse.Namespace) -> int:
     for name, usage in report.usage_by_teacher.items():
         spent = ", ".join(f"{k}={v}" for k, v in sorted(usage.items()))
         print(f"usage {name}: {spent}")
+    return 0
+
+
+def cmd_compile(args: argparse.Namespace) -> int:
+    rows = []
+    for path in args.records:
+        rows.extend(records_mod.read_records(path))
+    if not rows:
+        print("no training records found in the given files")
+        return 1
+    frozen = [s for s in (args.frozen or "").split(",") if s]
+    report = compile_mod.compile_dataset(
+        rows, out_dir=args.out_dir, frozen=frozen,
+        eval_fraction=args.eval_fraction, human_only=args.human_only,
+    )
+    print(f"{report.total_records} record(s) -> "
+          f"SFT {report.sft_train} train / {report.sft_eval} eval, "
+          f"DPO {report.dpo_train} train / {report.dpo_eval} eval")
+    for task, count in report.by_task.most_common():
+        print(f"  {task:18s} {count}")
+    if report.unmapped:
+        skipped = ", ".join(f"{k}={v}" for k, v in report.unmapped.most_common())
+        print(f"not compiled: {skipped}")
+    print(f"files + compile_report.md -> {args.out_dir}")
     return 0
 
 
@@ -399,6 +424,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true",
                    help="show teachers + first prompt; make no API calls")
     p.set_defaults(func=cmd_panel)
+
+    p = sub.add_parser("compile",
+                       help="training records -> SFT + DPO files for QLoRA")
+    p.add_argument("--records", action="append", required=True,
+                   help="TrainingRecord JSONL (repeat for several files)")
+    p.add_argument("--out-dir", required=True)
+    p.add_argument("--frozen", help="comma-separated session ids, always eval")
+    p.add_argument("--eval-fraction", type=float, default=0.2)
+    p.add_argument("--human-only", action="store_true",
+                   help="drop teacher-panel records; train on human decisions only")
+    p.set_defaults(func=cmd_compile)
 
     p = sub.add_parser("overnight",
                        help="run the whole overnight loop: panel -> bank -> "
