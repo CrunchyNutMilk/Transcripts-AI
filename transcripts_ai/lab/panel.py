@@ -1,7 +1,7 @@
 """The teacher panel: many opinions, one deterministic gate, zero authority.
 
 Layer 2a of docs/TRAINING.md. The panel takes the engine's pending
-review items — the questions Harry would otherwise answer by hand — and
+review items — the questions the human reviewer would otherwise answer by hand — and
 asks every configured teacher plus the engine's own resolver for a
 verdict. What happens next is decided by rules, not by any model:
 

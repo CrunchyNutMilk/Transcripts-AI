@@ -20,7 +20,7 @@ No AI provider is needed; this is the evidence substrate the AI stages build
 on. Usage:
 
     python scripts/ingest_campaign.py --data-dir <folder> --db <memory.sqlite> \
-        --campaign "Heckuva Side Quest" --report report.md
+        --campaign "<My Campaign>" --report report.md
 """
 from __future__ import annotations
 

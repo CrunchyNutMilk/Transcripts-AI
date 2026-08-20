@@ -129,7 +129,7 @@ class TestCli:
         assert lab_main(["train-kit", "--dataset", str(tmp_path),
                          "--out-dir", str(out)]) == 0
         assert "READY" in capsys.readouterr().out
-        assert (out / "train_heckuva-engine.py").exists()
+        assert (out / "train_dnd-engine.py").exists()   # campaign-neutral default
 
     def test_train_kit_not_ready_exits_nonzero(self, tmp_path, capsys):
         make_dataset(tmp_path, sft_train=5)

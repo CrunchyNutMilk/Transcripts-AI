@@ -519,7 +519,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dataset", required=True,
                    help="compile's --out-dir (sft_*.jsonl / dpo_*.jsonl)")
     p.add_argument("--out-dir", required=True)
-    p.add_argument("--model-name", default="heckuva-engine")
+    p.add_argument("--model-name", default="dnd-engine",
+                   help="name for the trained model (pick one per campaign)")
     p.add_argument("--base-model", default=trainkit_mod.DEFAULT_BASE_MODEL)
     p.set_defaults(func=cmd_train_kit)
 

@@ -1,7 +1,7 @@
 """Command-line interface for the engine.
 
     python -m transcripts_ai process --campaign camp-a --session 2026-08-01 \
-        --transcript "path/to/... - Transcripts Mapped.md" --game "Heckuva Side Quest"
+        --transcript "path/to/... - Transcripts Mapped.md" --game "<My Campaign>"
     python -m transcripts_ai ingest ...      # memory-only pass over an old session
     python -m transcripts_ai reviews --campaign camp-a
     python -m transcripts_ai facts --campaign camp-a --query "moon sickle"
@@ -27,6 +27,41 @@ from .providers import RoleRegistry
 
 def _memory(args: argparse.Namespace) -> CampaignMemory:
     return CampaignMemory(args.db)
+
+
+def cmd_vault_sync(args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from .vault import DEFAULT_SECTIONS, scan_vault, sync_vault
+
+    sections = tuple(args.sections) if args.sections else DEFAULT_SECTIONS
+    entities, skipped = scan_vault(args.vault, campaign_id=args.campaign,
+                                   sections=sections)
+    if not entities:
+        print("no entity pages found — check --vault points at the campaign "
+              "folder (the one containing '03 - PCs')")
+        return 1
+    by_kind = Counter(e.kind.value for e in entities)
+    alias_total = sum(len(e.aliases) for e in entities)
+    print(f"{len(entities)} vault entit(ies), {alias_total} alias(es): "
+          + ", ".join(f"{k}={v}" for k, v in sorted(by_kind.items())))
+    if args.dry_run:
+        for entity in entities:
+            aka = f"  (aka {', '.join(entity.aliases)})" if entity.aliases else ""
+            print(f"  [{entity.kind.value:8s}] {entity.name}{aka}")
+        print(f"dry run: nothing written; {len(skipped)} page(s) skipped")
+        return 0
+    memory = _memory(args)
+    try:
+        entity_count, alias_count = sync_vault(memory, args.campaign, entities)
+    finally:
+        memory.close()
+    print(f"synced {entity_count} entit(ies) and {alias_count} alias(es) "
+          f"into {args.db}")
+    if skipped:
+        print(f"skipped {len(skipped)} page(s) (structural/other-campaign); "
+              "use --dry-run to list them")
+    return 0
 
 
 def load_session_mapping(path: str, campaign_id: str, session_id: str,
@@ -435,6 +470,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--campaign", required=True)
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_audit)
+
+    p = sub.add_parser("vault-sync",
+                       help="seed memory with the vault's canonical entities "
+                            "and alias lists (one-way, vault is never written)")
+    p.add_argument("--vault", required=True,
+                   help="campaign folder of the vault (the one containing your "
+                        "PC/NPC sections)")
+    p.add_argument("--campaign", required=True)
+    p.add_argument("--sections", nargs="*",
+                   help="vault subfolders to scan (default: PCs, NPCs & "
+                        "Locations, Quests, Bestiary)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="show what would be imported; write nothing")
+    p.set_defaults(func=cmd_vault_sync)
 
     args = parser.parse_args(argv)
     return args.func(args)

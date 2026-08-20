@@ -29,8 +29,8 @@ Examples:
     python scripts/transcribe_session.py --backend whisper-cpp \
         --server http://127.0.0.1:8178 --out 20260809_unmapped.md "*.mp3"
     python scripts/transcribe_session.py --out s.md --process \
-        --campaign "Heckuva Side Quest" --session 2026-08-09 \
-        --game "Heckuva Side Quest" "*Part*.mp3"
+        --campaign "<My Campaign>" --session 2026-08-09 \
+        --game "<My Campaign>" "*Part*.mp3"
     python scripts/transcribe_session.py --backend faster-whisper \
         --craig "craig-abc123.aac.zip" --mapping mapping.json \
         --initial-prompt-file prompt.txt --out 20260816_craig.md
