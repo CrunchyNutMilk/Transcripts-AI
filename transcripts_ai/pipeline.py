@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .detector import detect_names
-from .dnd5e import is_registrable, kind_for, mentions_in_entries, nearest_official
+from .dnd_patterns import assess_entry
+from .dnd5e import (exact_official, is_registrable, kind_for,
+                    mentions_in_entries, nearest_official, official_names)
 from .extraction import (
     ExtractionResult,
     FactExtractor,
@@ -264,8 +266,6 @@ class SessionPipeline:
         evidence: the party actually obtaining a "Horn of Blasting" is what
         makes it campaign canon-adjacent, not the phrase drifting through
         narration."""
-        from .dnd5e import kind_for, official_names
-
         officials = official_names()
         for fact in facts:
             if fact.category.value != "loot" or not fact.object_:
@@ -342,8 +342,12 @@ class SessionPipeline:
         """
         resolver = NameResolver(self.memory)
         items: list[ReviewItem] = []
+        # Jokes and OOC chatter never produce facts; they must not produce
+        # review questions either ("AFK", "Star Wars", "Share Your Screen").
+        in_world = [e for e in entries
+                    if assess_entry(e).status is not EpistemicStatus.TABLE_TALK]
         for candidate in detect_names(
-            entries, known_names=frozenset(n.casefold() for n in known)
+            in_world, known_names=frozenset(n.casefold() for n in known)
         ):
             reasons = set(candidate.reasons)
             if reasons == {"known_entity_mention"}:
@@ -354,6 +358,29 @@ class SessionPipeline:
             best = resolution.best
             if best is not None and best.band is BandAction.AUTO_LINK:
                 continue                     # confidently known under another name
+            official = exact_official(candidate.text)
+            if official is not None:
+                # The detector says it reads as a name; the rulebook says
+                # exactly what it is. Two independent signals on a closed
+                # vocabulary leave nothing to ask a human — register it.
+                if self.memory.find_entity(campaign_id, official) is None:
+                    self.memory.upsert_entity(
+                        EntityRecord(
+                            name=official,
+                            kind=kind_for(official),
+                            campaign_id=campaign_id,
+                            status=EpistemicStatus.STRONGLY_SUPPORTED,
+                            description=(f"Official D&D 5e "
+                                         f"{official_names()[official]}"),
+                            attributes={
+                                "official_5e": official_names()[official],
+                                "first_seen_session": session_id,
+                                "first_seen_line": candidate.entry_line,
+                            },
+                        ),
+                        actor="engine:5e-reference",
+                    )
+                continue
             suggestions = [
                 {"canonical": s.canonical, "score": round(s.score, 3),
                  "explanation": s.explanation}

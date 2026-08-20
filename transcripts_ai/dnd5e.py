@@ -237,6 +237,17 @@ def mentions_in_entries(entries: list[TranscriptEntry]) -> list[OfficialMention]
     return mentions
 
 
+@lru_cache(maxsize=1)
+def _folded_official() -> dict[str, str]:
+    return {" ".join(_tokens(n)): n for n in official_names()}
+
+
+def exact_official(text: str) -> str | None:
+    """The official name this text IS, ignoring case/spacing. None if it
+    is not an official name at all."""
+    return _folded_official().get(" ".join(_tokens(text)))
+
+
 def nearest_official(text: str) -> NearMiss | None:
     """Best official near-match for a short candidate string, if any."""
     toks = tuple(_tokens(text))

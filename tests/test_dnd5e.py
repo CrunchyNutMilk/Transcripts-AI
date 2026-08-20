@@ -382,3 +382,36 @@ class TestAuditHardening:
             assert fixed.get("wich") == "which"
         finally:
             memory.close()
+
+
+class TestExactOfficialNeverAsksTheHuman:
+    """From the real gold transcript: a clean, properly-capitalised
+    transcript flooded the review queue with rulebook terms the engine
+    already knows (77 items). Exact official names are a closed
+    vocabulary — nothing to ask."""
+
+    def test_rule_terms_register_instead_of_queueing(self, tmp_path):
+        from transcripts_ai.dnd5e import exact_official
+        assert exact_official("detect magic") == "Detect Magic"
+        assert exact_official("Cure  Wounds") == "Cure Wounds"
+        assert exact_official("Nilne Allanar") is None
+
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "DM: She casts Detect Magic, then Cure Wounds on the child.\n\n"
+            "Jinx: I use Detect Magic again by the Blade of Unification.\n",
+            encoding="utf-8")
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1")
+            subjects = {i.subject for i in report.review_items}
+            assert "Detect Magic" not in subjects
+            assert "Cure Wounds" not in subjects
+            spell = memory.find_entity("camp", "Detect Magic")
+            assert spell is not None and spell.kind is EntityKind.SPELL
+            # genuine campaign lore still reaches the human
+            assert "Blade of Unification" in subjects
+        finally:
+            memory.close()
