@@ -250,6 +250,39 @@ class SessionPipeline:
             registered.append(mention.name)
         return registered
 
+    _SUMMARY_NPC_KINDS = frozenset({"npc", "faction", "deity", "creature"})
+
+    def _known_mentions(
+        self, campaign_id: str, entries: list[TranscriptEntry],
+        known: frozenset[str],
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Known entities actually mentioned this session, canonical names,
+        split into (npc-like, locations) for the summary's Names section."""
+        npcs: dict[str, None] = {}
+        locations: dict[str, None] = {}
+        for candidate in detect_names(
+            entries, known_names=frozenset(n.casefold() for n in known)
+        ):
+            if "known_entity_mention" not in candidate.reasons:
+                continue
+            entity = self.memory.find_entity(campaign_id, candidate.text)
+            if entity is None:
+                alias = self.memory.resolve_alias(campaign_id, candidate.text)
+                if alias is None:
+                    continue
+                entity = self.memory.find_entity(campaign_id, alias.canonical)
+                if entity is None:
+                    continue
+            if entity.attributes.get("official_5e") == "monster":
+                # Generic statblock words (Druid, Zombie, Hobgoblin) are
+                # rulebook vocabulary, not this campaign's cast.
+                continue
+            if entity.kind.value in self._SUMMARY_NPC_KINDS:
+                npcs.setdefault(entity.name, None)
+            elif entity.kind.value == "location":
+                locations.setdefault(entity.name, None)
+        return tuple(npcs), tuple(locations)
+
     def _propose_entity_candidates(
         self,
         campaign_id: str,
@@ -361,8 +394,14 @@ class SessionPipeline:
         self._register_official_mentions(campaign_id, session_id,
                                          parsed.entries, str(path))
         # Exact stored casing — the normaliser must never reconstruct names.
-        # (Freshly registered official names join it, so recasing works.)
-        known = frozenset(e.name for e in self.memory.entities(campaign_id))
+        # Alias spellings are known names too: "vel'nadar" in lowercase text
+        # must count as a known mention, not a new-name candidate.
+        alias_rows = self.memory.aliases(campaign_id)
+        known = frozenset(
+            {e.name for e in self.memory.entities(campaign_id)}
+            | {a.observed for a in alias_rows}
+            | {a.canonical for a in alias_rows}
+        )
         facts = extract_native_facts(
             parsed.entries,
             campaign_id=campaign_id,
@@ -403,6 +442,8 @@ class SessionPipeline:
             self.memory, campaign_id, verified, actor=PIPELINE_VERSION
         )
 
+        npcs_seen, locations_seen = self._known_mentions(
+            campaign_id, parsed.entries, known)
         summary_context = self.context_builder.build(
             campaign_id, session_id, chunks[0], task="summarizer"
         )
@@ -416,6 +457,8 @@ class SessionPipeline:
             facts=facts,
             scenes=scenes,
             manifest_hash=summary_context.manifest_hash,
+            npcs_seen=npcs_seen,
+            locations_seen=locations_seen,
         )
         report.summary = summary
         report.summary_markdown = render_markdown(

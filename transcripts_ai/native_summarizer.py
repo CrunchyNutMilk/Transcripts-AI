@@ -48,6 +48,8 @@ def build_native_summary(
     facts: list[Fact],
     scenes: list[Scene],
     manifest_hash: str,
+    npcs_seen: tuple[str, ...] = (),
+    locations_seen: tuple[str, ...] = (),
 ) -> SessionSummary:
     events = detect_events(parsed.entries)
     sections = {title: SummarySection(title=title) for title in SECTION_TITLES}
@@ -141,10 +143,17 @@ def build_native_summary(
             + ", ".join(f"{t.value} ({c} scenes)" for t, c in scene_mix.most_common(3))
         )
 
-    # NPCs/groups and locations named by this session's facts, in order seen.
+    # NPCs/groups and locations named this session: known-entity mentions
+    # detected in the text (any casing, aliases included) first, then
+    # whatever this session's facts named. Party members never list here.
     npcs: dict[str, None] = {}
     locations: dict[str, None] = {}
     party_folded = {p.casefold() for p in party}
+    for name in npcs_seen:
+        if name.casefold() not in party_folded:
+            npcs.setdefault(name, None)
+    for name in locations_seen:
+        locations.setdefault(name, None)
     for fact in ordered:
         bucket = None
         if fact.category in (FactCategory.NPC, FactCategory.ALIAS):

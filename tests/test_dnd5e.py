@@ -208,3 +208,35 @@ class TestEngineIntegration:
             assert "thunderous" not in corrected
         finally:
             memory.close()
+
+
+class TestKnownMentionsInSummary:
+    def test_alias_mentions_reach_the_names_section(self, tmp_path):
+        from transcripts_ai.schemas import AliasRecord, EntityRecord
+        transcript = tmp_path / "s1 Mapped.md"
+        transcript.write_text(
+            "Jinx: i think vel'nadar is still tracking us through the crystal.\n\n"
+            "DM: The shadow over oxwater deepens tonight.\n",
+            encoding="utf-8")
+        memory = CampaignMemory(tmp_path / "m.sqlite")
+        try:
+            vel = memory.upsert_entity(
+                EntityRecord(name="Vel Nadar", kind=EntityKind.NPC,
+                             campaign_id="camp"), actor="human:1")
+            memory.add_alias(
+                AliasRecord(campaign_id="camp", observed="Vel'Nadar",
+                            canonical="Vel Nadar", entity_id=vel.entity_id,
+                            approved_by="human:1"), actor="human:1")
+            memory.upsert_entity(
+                EntityRecord(name="Oxwater", kind=EntityKind.LOCATION,
+                             campaign_id="camp"), actor="human:1")
+            report = SessionPipeline(memory).process_session_native(
+                campaign_id="camp", session_id="s1",
+                transcript_path=transcript, game_name="G", session_date="s1")
+            assert "Vel Nadar" in report.summary.npcs_and_groups
+            assert "Oxwater" in report.summary.locations
+            # alias mention is a known mention, never a new-name candidate
+            assert not [i for i in report.review_items
+                        if "nadar" in i.subject.casefold()]
+        finally:
+            memory.close()

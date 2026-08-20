@@ -83,15 +83,54 @@ project up from the repo alone.
 
 ## Current status
 
-- **Branch**: `claude/transcript-ai-pipeline-gc4vpn` · **PR #1 is a draft on
-  purpose** — it must not be merged, marked ready, or broadened until the
-  owner completes the on-PC run in `docs/RUNBOOK.md` (mapping → ingest →
-  review → re-ingest against the real vault).
+- **Branches**: `claude/transcript-ai-pipeline-gc4vpn` (PR #1, the engine)
+  and `claude/training-lab` (everything below — the training lab, vault
+  sync, Craig support, 5e knowledge). **PR #1 is a draft on purpose** — it
+  must not be merged, marked ready, or broadened until the owner completes
+  the on-PC run in `docs/RUNBOOK.md` (mapping → ingest → review →
+  re-ingest against the real vault).
 - **On the PC**: code at `C:\dev\Transcript_AI`, engine state (database,
   mapping, reports) kept outside the repo at `C:\dev\Transcript_AI_data`.
 - **Next**: complete the runbook, review the queue (alias pairs first),
   `train`, re-ingest, then process the 2026-08-09 and 2026-08-16 sessions
   once the bot has produced their Mapped transcripts.
+
+## The training lab (branch `claude/training-lab`, 2026-08-20)
+
+The self-improvement machine around the engine, adversarially reviewed
+layer by layer (every layer was attacked by a fleet of verifier agents;
+dozens of confirmed findings fixed with regression tests). All commands
+under `python -m transcripts_ai.lab ...`:
+
+| Layer | Commands | What it does |
+|---|---|---|
+| 1 Measurement | `export-records` `tally` `split` `make-bank` `score` | Human decisions become versioned training records and scored question banks; session-level train/eval splits (frozen sessions never train); deterministic token scoring; the memory-only baseline every model must beat |
+| 2a Teacher panel | `teachers` `panel` | GPT / Claude / Gemini / local Llama vote on pending review items; unanimous verdicts through a deterministic evidence gate bank as training data (teachers can never invent a name past the gate or bank alone); everything else queues pre-answered |
+| 2b Overnight loop | `overnight` | One crash-safe command: panel → bank → queue → nightly scorecard → morning report. Checkpoints after every item; resume never re-pays; out-dir locked against double runs |
+| 3 Compile | `compile` | Records → SFT chat data + DPO preference pairs (human decisions only) in axolotl/unsloth format, leak-checked splits |
+| 4 Train kit + gate | `train-kit` `promote` | Generates the RTX-3080 QLoRA script, Ollama Modelfile and runbook sized to the dataset; `promote` lets a model take an engine role only after beating the baseline on the same bank |
+| 5 Proof + growth | `time-travel` `quiz` | Memory-compounding measurement (on the real campaign: 0% cold → 55-77% late-session recognition) and post-game recap trivia whose every answer is a training label |
+| Gold transcripts | `whisper-prompt` `gold-score` `names-check` | Seed Whisper with campaign names; score machine vs hand-corrected transcripts (WER + known-name accuracy) and mine every fix as a label; catch mangled official 5e terms |
+
+Engine-side additions on the same branch:
+
+- **`vault-sync`** (`python -m transcripts_ai vault-sync`): seed memory from
+  ANY campaign's Obsidian folder — entities, kinds, and frontmatter `aliases`
+  lists become human-approved aliases. One command imported 138 entities and
+  225 aliases from the real vault; the last session's review queue dropped
+  from 5 items to 2, both pre-answered.
+- **Official 5e knowledge** (`transcripts_ai/data/dnd5e_names.txt`): ~1,100
+  SRD spells/monsters + standard items/deities. Mentions auto-register as
+  kind-correct entities (closed vocabulary — nothing to invent), lowercase
+  loot like "you'll find a necklace of prayer beads" becomes an evidenced
+  fact, and the spellchecker never "fixes" rulebook words.
+- **Craig multitrack support** (`--craig`, `scripts/relabel_transcript.py`):
+  Discord recordings arrive with one track per speaker, so transcripts come
+  out speaker-labelled with no diarization; `mapping.json` turns usernames
+  into character names.
+- **Campaign-generic by construction**: knowledge lives only in per-campaign
+  memory, mapping.json and vault folder; a test proves two campaigns in one
+  database can never cross.
 
 ## Usage
 

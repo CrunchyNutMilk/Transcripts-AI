@@ -29,6 +29,21 @@ copy mapping.example.json C:\Users\neill\Documents\engine\mapping.json
 notepad C:\Users\neill\Documents\engine\mapping.json
 ```
 
+## 2b. Seed memory from the vault FIRST (30 s, branch `claude/training-lab`)
+
+The vault is the canon. One command teaches the engine every PC, NPC,
+location, quest and creature page — including each page's `aliases` list,
+which becomes human-approved aliases the resolver auto-links on sight.
+Run it before ingesting anything and the review queue shrinks drastically
+(on the last session: 5 items → 2, both pre-answered).
+
+```powershell
+python -m transcripts_ai --db C:\Users\neill\Documents\engine\engine_memory.sqlite `
+  vault-sync --vault "path\to\vault\01_Heckuva Side Quest" `
+  --campaign "Heckuva Side Quest"
+# add --dry-run first if you want to see the list before it writes
+```
+
 ## 3. Build campaign memory from your real vault (2 min)
 
 Keep the database **outside the repo** too. The ingester walks subfolders,

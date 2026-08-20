@@ -2,7 +2,7 @@ import pytest
 
 from transcripts_ai.memory import CampaignMemory
 from transcripts_ai.phonetics import damerau_levenshtein, phonetic_key, similarity_ratio
-from transcripts_ai.resolver import NameResolver, fuzzy_threshold
+from transcripts_ai.resolver import BandAction, NameResolver, fuzzy_threshold
 from transcripts_ai.schemas import AliasRecord, EntityKind, EntityRecord
 
 
@@ -117,3 +117,46 @@ class TestResolver:
         res = resolver.resolve("camp-a", "Silverspyre")
         assert res.best.canonical == "Silverspire"
         assert res.needs_human
+
+
+class TestAliasFuzzyAndSpacing:
+    """Vault aliases join the fuzzy pool; spacing differences stop
+    blinding the matcher (real case: 'Valadar' vs alias 'Val Nadar')."""
+
+    def _seed(self, memory):
+        from transcripts_ai.schemas import AliasRecord, EntityKind, EntityRecord
+        vel = memory.upsert_entity(
+            EntityRecord(name="Vel Nadar", kind=EntityKind.NPC,
+                         campaign_id="camp"), actor="human:1")
+        memory.add_alias(
+            AliasRecord(campaign_id="camp", observed="Val Nadar",
+                        canonical="Vel Nadar", entity_id=vel.entity_id,
+                        approved_by="human:1"), actor="human:1")
+        memory.upsert_entity(
+            EntityRecord(name="Silver Spire", kind=EntityKind.LOCATION,
+                         campaign_id="camp"), actor="human:1")
+
+    def test_new_mishearing_matches_via_recorded_alias(self, memory):
+        self._seed(memory)
+        best = NameResolver(memory).resolve("camp", "Valadar").best
+        assert best is not None
+        assert best.canonical == "Vel Nadar"
+        assert "via_recorded_alias" in best.reasons
+        assert best.band in (BandAction.SUGGEST, BandAction.SAVE_FOR_REVIEW)
+
+    def test_squashed_spacing_matches(self, memory):
+        self._seed(memory)
+        best = NameResolver(memory).resolve("camp", "Silverspire").best
+        assert best is not None and best.canonical == "Silver Spire"
+        assert "spacing_variant" in best.reasons
+
+    def test_one_suggestion_per_canonical(self, memory):
+        self._seed(memory)
+        resolution = NameResolver(memory).resolve("camp", "Val Nadar's")
+        canonicals = [s.canonical for s in resolution.suggestions]
+        assert canonicals.count("Vel Nadar") <= 1
+
+    def test_fuzzy_alias_never_auto_links(self, memory):
+        self._seed(memory)
+        best = NameResolver(memory).resolve("camp", "Valadar").best
+        assert best.band is not BandAction.AUTO_LINK
